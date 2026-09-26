@@ -1,0 +1,52 @@
+# Thin caller — everything else (state machine, policy evaluation, Claude fix job) runs
+# from the central noneedinmagic/awe repo at the pinned ref below.
+name: AI PR Orchestration
+
+on:
+  pull_request:
+    # unlabeled: so removing the manual opt-in label is observed immediately (the
+    # orchestrator otherwise stays silent until some other event happens to fire).
+    # edited: fires on base-branch retarget — without it, a stacked PR whose base
+    # merges (GitHub retargets it to the default branch) sits unnoticed until some
+    # other event; with it, the PR enters the machine the moment its base flips.
+    # converted_to_draft: without it, a PR pulled back to draft never re-enters the
+    # machine — the runtime draft guard that would neutralize a stale ai:ready/ai:fixing
+    # gate only runs when SOME event fires, and no other listed type covers this one.
+    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, labeled, unlabeled, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+  # Human control surface: /ai retry|fix|status|refresh comments (listed humans only) and
+  # human REQUEST_CHANGES reviews both drive the machine.
+  issue_comment:
+    types: [created]
+  # CI-completion edge — this repo's actual CI workflow is named `test` (see
+  # .github/workflows/test.yml), not the template's default `CI`.
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+
+jobs:
+  orchestrate:
+    if: >-
+      (github.event_name != 'issue_comment' ||
+        (contains(github.event.comment.body, '/ai') &&
+         !endsWith(github.event.comment.user.login, '[bot]'))) &&
+      (github.event_name != 'pull_request' || github.actor != 'dependabot[bot]') &&
+      (github.event_name != 'pull_request' || github.event.action != 'edited' ||
+        github.event.changes.base)
+    # Pin `live` — the only supported ref; it moves automatically to the latest green
+    # main of noneedinmagic/awe. Do NOT pin a SHA or a point version.
+    uses: noneedinmagic/awe/.github/workflows/orchestrator.yml@live
+    with:
+      runs-on: ${{ vars.CI_RUNNER_MODE == 'local' && 'self-hosted' || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      checks: write
+      actions: read
+      id-token: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      AI_ORCH_TELEGRAM_BOT_TOKEN: ${{ secrets.AI_ORCH_TELEGRAM_BOT_TOKEN }}
+      AI_ORCH_TELEGRAM_CHAT_ID: ${{ secrets.AI_ORCH_TELEGRAM_CHAT_ID }}
