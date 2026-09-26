@@ -9,6 +9,17 @@ import { fileURLToPath } from "node:url";
 const API_VERSION = "2022-11-28";
 const DEFAULT_API_URL = "https://api.github.com";
 const REQUEST_TIMEOUT_MS = 10_000;
+const MIN_NODE_MAJOR = 20;
+
+export function checkNodeVersion(nodeVersion, minMajor = MIN_NODE_MAJOR) {
+  const major = Number.parseInt(String(nodeVersion).split(".")[0], 10);
+
+  if (Number.isNaN(major) || major < minMajor) {
+    return `gh-identity-router requires Node.js >=${minMajor}, found ${nodeVersion}`;
+  }
+
+  return null;
+}
 
 function fail(message) {
   throw new Error(message);
@@ -670,6 +681,13 @@ const isEntrypoint = process.argv[1]
   && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
 if (isEntrypoint) {
+  const nodeVersionError = checkNodeVersion(process.versions.node);
+
+  if (nodeVersionError) {
+    process.stderr.write(`${nodeVersionError}\n`);
+    process.exit(1);
+  }
+
   main().catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
