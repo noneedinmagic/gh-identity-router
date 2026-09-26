@@ -1,0 +1,25 @@
+{
+  "appId": 123456,
+  "privateKeyPath": "/home/USER/.config/gh-multi-account/private-key.pem",
+  "defaultAccount": "your-user",
+  "accounts": {
+    "your-user": {
+      "type": "app",
+      "accountId": 12345678,
+      "installationId": 11111111,
+      "targetType": "User"
+    },
+    "your-org": {
+      "type": "app",
+      "accountId": 87654321,
+      "installationId": 22222222,
+      "targetType": "Organization"
+    },
+    "contractor-org": {
+      "type": "pat",
+      "accountId": 900000001,
+      "targetType": "Organization",
+      "tokenPath": "/home/USER/.config/gh-multi-account/tokens/contractor-org.token"
+    }
+  }
+}

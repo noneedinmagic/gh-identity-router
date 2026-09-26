@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+real_gh="${MULTI_ACCOUNT_REAL_GH:-/usr/bin/gh}"
+token_command="${MULTI_ACCOUNT_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-token}"
+
+if [[ ! -x "$real_gh" ]]; then
+  echo "Real gh binary not found at $real_gh" >&2
+  exit 127
+fi
+
+repo=""
+args=("$@")
+
+for ((index = 0; index < ${#args[@]}; index += 1)); do
+  case "${args[$index]}" in
+    -R|--repo)
+      if ((index + 1 >= ${#args[@]})); then
+        echo "Missing value for ${args[$index]}" >&2
+        exit 2
+      fi
+      repo="${args[$((index + 1))]}"
+      break
+      ;;
+    --repo=*)
+      repo="${args[$index]#--repo=}"
+      break
+      ;;
+  esac
+done
+
+token_args=()
+
+if [[ -n "$repo" ]]; then
+  token_args=(--repo "$repo")
+elif [[ -n "${GH_REPO:-}" ]]; then
+  token_args=(--repo "$GH_REPO")
+elif remote_url="$(git config --get remote.origin.url 2>/dev/null)" && [[ -n "$remote_url" ]]; then
+  token_args=(--remote-url "$remote_url")
+fi
+
+token="$("$token_command" "${token_args[@]}")"
+GH_TOKEN="$token" exec "$real_gh" "$@"

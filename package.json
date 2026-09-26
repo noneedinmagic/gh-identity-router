@@ -1,0 +1,18 @@
+{
+  "name": "gh-identity-router",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-account GitHub App/PAT credential routing by target repository owner, shared by any coding-agent identity that needs to act as a different login per organization",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noneedinmagic/gh-identity-router.git"
+  },
+  "scripts": {
+    "test": "node --test && bash test/identity.test.sh && bash bin/identity.sh --self-check && bash -c 'find . -name \"*.sh\" -not -path \"./node_modules/*\" -print0 | xargs -0 -n1 bash -n' && node scripts/scrub-check.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

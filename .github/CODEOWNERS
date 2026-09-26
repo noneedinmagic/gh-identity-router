@@ -1,0 +1,9 @@
+# This tool mints and handles live GitHub credentials — require the owner's
+# review on anything that resolves, signs, or mints a token, plus the
+# installer/setup path and repo policy itself. Mirrors .github/ai-policy.yml's
+# risk.human_required_paths.
+/src/           @noneedinmagic
+/bin/           @noneedinmagic
+/install.sh     @noneedinmagic
+/scripts/       @noneedinmagic
+/.github/       @noneedinmagic

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+token_command="${MULTI_ACCOUNT_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-token}"
+repo="${1:?Usage: mint-dispatch-token OWNER/REPO}"
+
+if [[ "$repo" != */* ]]; then
+  echo "mint-dispatch-token: repo must be OWNER/REPO, got: $repo" >&2
+  exit 2
+fi
+
+repo_owner="${repo%%/*}"
+repo_name="${repo##*/}"
+repo_name="${repo_name%.git}"
+
+if [[ -z "$repo_owner" || -z "$repo_name" ]]; then
+  echo "mint-dispatch-token: repo must be OWNER/REPO, got: $repo" >&2
+  exit 2
+fi
+
+token="$("$token_command" --repo "$repo" --repositories "$repo_name" --permissions "contents=write,pull_requests=write")"
+
+if [[ -z "$token" ]]; then
+  echo "mint-dispatch-token: multi-account-token returned an empty token" >&2
+  exit 1
+fi
+
+printf 'DISPATCH_GH_TOKEN=%s\n' "$token"
