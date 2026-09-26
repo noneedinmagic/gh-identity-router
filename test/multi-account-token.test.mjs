@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertPrivateFile,
+  checkNodeVersion,
   classifyInstallations,
   createAppJwt,
   listAppInstallations,
@@ -595,4 +596,16 @@ test("--repositories/--permissions on a PAT-typed account fails rather than mint
   assert.ifError(result.error);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /pat-typed; --repositories\/--permissions only narrow/);
+});
+
+test("checkNodeVersion accepts versions at or above the minimum", () => {
+  assert.equal(checkNodeVersion("20.0.0", 20), null);
+  assert.equal(checkNodeVersion("22.5.1", 20), null);
+});
+
+test("checkNodeVersion rejects unsupported major versions with a clear message", () => {
+  const message = checkNodeVersion("18.19.0", 20);
+
+  assert.match(message, /requires Node\.js >=20/);
+  assert.match(message, /18\.19\.0/);
 });
