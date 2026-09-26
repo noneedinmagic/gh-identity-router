@@ -10,9 +10,13 @@ version: 1
 
 # dry-run: classify + narrate in a sticky comment, take no actions (recommended start)
 # active: full orchestration    disabled: ignore this repo
-mode: dry-run
+mode: active
 
-max_rounds: 2              # automatic Codex→Claude fix rounds before human handoff
+# Phase 1 (review request + handoff): max_rounds: 0 keeps backends.fixer wired but
+# means every blocking review goes straight to human handoff instead of an automatic
+# Claude fix round — the "simpler" Phase 1 option (docs/rollout.md), chosen since the
+# CLAUDE_CODE_OAUTH_TOKEN secret is already set. Bump once ready for Phase 2.
+max_rounds: 0               # automatic Codex→Claude fix rounds before human handoff
 ci_failure_threshold: 2    # consecutive red CI cycles before human handoff
 echo_frequency: 100        # timeline items between automatic status echoes; 0 or null disables (see docs/ai-command.md)
 
@@ -97,4 +101,4 @@ merge:
 
 notifications:
   telegram:
-    enabled: false
+    enabled: true   # AI_ORCH_TELEGRAM_BOT_TOKEN/AI_ORCH_TELEGRAM_CHAT_ID secrets are set
