@@ -159,6 +159,36 @@ assert_contains "$OUT" "derived via git config user.name"
 [ ! -s "$stub_calls" ] || fail "expected no gh stub to be reachable, but $stub_calls is non-empty"
 echo "OK: --check falls back to git config user.name and says so"
 
+# --- kind: human declared and matching -> --check OK, but --footer refuses --
+cat >"$fake_home/.agent-identity" <<'EOF'
+display_name: A Human
+app:          example-user
+kind:         human
+EOF
+run_check "$GH_HUMAN"
+assert_eq "$RC" 0
+assert_eq "$OUT" ""
+assert_stub_called
+echo "OK: --check allows a declared kind: human account matching the derived login"
+
+set +e
+footer_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$GH_HUMAN" "$SCRIPT" --footer 2>&1)"
+footer_rc=$?
+set -e
+assert_eq "$footer_rc" 2
+assert_contains "$footer_out" "REFUSED: kind: human is declared"
+echo "OK: --footer refuses to attach an agent footer to a kind: human PR"
+
+# --- unfilled <placeholder> in the identity file is called out, not silently
+# treated as a real declaration ------------------------------------------------
+cat >"$fake_home/.agent-identity" <<'EOF'
+display_name: <your display name>
+app:          <your GitHub login>
+EOF
+block_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$GH_BOT" "$SCRIPT" 2>&1)"
+assert_contains "$block_out" "still has an unfilled <placeholder>"
+echo "OK: bare block warns about an unfilled <placeholder> in the identity file"
+
 # Note: a pre-push git hook that calls identity.sh --check is not part of
 # this package's snapshot — that's a per-consuming-project integration, wired
 # up separately for each project's own config path.
