@@ -91,6 +91,19 @@ test("fails closed on a bare HOST/OWNER/REPO selector for a non-github.com host"
   );
 });
 
+test("redacts embedded credentials from an unparseable selector's error message", () => {
+  assert.throws(
+    () => resolveAccount(config, { remoteUrl: "https://x-access-token:ghp_secret@gitlab.com/example-org/repo" }),
+    (error) => {
+      assert.match(error.message, /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/example-org\/repo/);
+      assert.doesNotMatch(error.message, /ghp_secret/);
+      assert.doesNotMatch(error.message, /x-access-token/);
+
+      return true;
+    }
+  );
+});
+
 test("falls through to the next selector when repository/remoteUrl are simply absent", () => {
   assert.equal(
     resolveAccount(config, { repository: undefined, environmentAccount: "example-org" }).name,

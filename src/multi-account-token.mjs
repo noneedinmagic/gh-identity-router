@@ -218,6 +218,22 @@ export function readPatToken(account) {
   return token;
 }
 
+// An unparseable selector can still be a URL carrying a real credential
+// (`https://x-access-token:TOKEN@host/...`) — strip it before the value is echoed back
+// in an error message, so a bad selector never leaks a secret into stderr/logs.
+function redactCredentials(value) {
+  try {
+    const url = new URL(value);
+
+    url.username = "";
+    url.password = "";
+
+    return url.toString();
+  } catch {
+    return value.replace(/:\/\/[^/\s]*@/, "://[redacted]@");
+  }
+}
+
 function resolveOwnerSelector(rawValue, label) {
   if (!rawValue) {
     return null;
@@ -226,7 +242,7 @@ function resolveOwnerSelector(rawValue, label) {
   const owner = parseRepositoryOwner(rawValue);
 
   if (!owner) {
-    fail(`Could not parse a GitHub owner from ${label}: ${rawValue}`);
+    fail(`Could not parse a GitHub owner from ${label}: ${redactCredentials(rawValue)}`);
   }
 
   return owner;
