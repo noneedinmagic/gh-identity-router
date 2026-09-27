@@ -53,6 +53,7 @@ test("parses GitHub repository owners from supported forms", () => {
   assert.equal(parseRepositoryOwner("https://github.com/example-org/repo.git"), "example-org");
   assert.equal(parseRepositoryOwner("git@github.com:example-org/repo.git"), "example-org");
   assert.equal(parseRepositoryOwner("https://gitlab.com/example-org/repo"), null);
+  assert.equal(parseRepositoryOwner("gitlab.com/example-org/repo"), null);
 });
 
 test("resolves selectors before the configured default", () => {
@@ -66,6 +67,34 @@ test("rejects an owner detected from a repository when it is not allow-listed", 
   assert.throws(
     () => resolveAccount(config, { repository: "outsider/repo" }),
     /not allow-listed/
+  );
+});
+
+test("fails closed on a --repo value missing the /repo segment, naming the string", () => {
+  assert.throws(
+    () => resolveAccount(config, { repository: "example-org" }),
+    /Could not parse a GitHub owner from --repo: example-org/
+  );
+});
+
+test("fails closed on a non-github.com remote URL, naming the string", () => {
+  assert.throws(
+    () => resolveAccount(config, { remoteUrl: "https://gitlab.com/example-org/repo" }),
+    /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/example-org\/repo/
+  );
+});
+
+test("fails closed on a bare HOST/OWNER/REPO selector for a non-github.com host", () => {
+  assert.throws(
+    () => resolveAccount(config, { repository: "gitlab.com/example-org/repo" }),
+    /Could not parse a GitHub owner from --repo: gitlab\.com\/example-org\/repo/
+  );
+});
+
+test("falls through to the next selector when repository/remoteUrl are simply absent", () => {
+  assert.equal(
+    resolveAccount(config, { repository: undefined, environmentAccount: "example-org" }).name,
+    "example-org"
   );
 });
 

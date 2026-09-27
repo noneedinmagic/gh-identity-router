@@ -62,7 +62,11 @@ export function parseRepositoryOwner(value) {
     .split("/")
     .filter(Boolean);
 
-  if (parts.length < 2) {
+  if (parts.length < 2 || parts.length > 3) {
+    return null;
+  }
+
+  if (parts.length === 3 && parts[0].toLowerCase() !== "github.com") {
     return null;
   }
 
@@ -214,10 +218,24 @@ export function readPatToken(account) {
   return token;
 }
 
+function resolveOwnerSelector(rawValue, label) {
+  if (!rawValue) {
+    return null;
+  }
+
+  const owner = parseRepositoryOwner(rawValue);
+
+  if (!owner) {
+    fail(`Could not parse a GitHub owner from ${label}: ${rawValue}`);
+  }
+
+  return owner;
+}
+
 export function resolveAccount(config, selectors = {}) {
   const explicitAccount = selectors.account ? normalizeAccount(selectors.account) : null;
-  const repositoryOwner = parseRepositoryOwner(selectors.repository);
-  const remoteOwner = parseRepositoryOwner(selectors.remoteUrl);
+  const repositoryOwner = resolveOwnerSelector(selectors.repository, "--repo");
+  const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL");
   const environmentAccount = selectors.environmentAccount
     ? normalizeAccount(selectors.environmentAccount)
     : null;
