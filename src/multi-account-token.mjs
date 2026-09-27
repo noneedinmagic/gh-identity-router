@@ -62,7 +62,11 @@ export function parseRepositoryOwner(value) {
     .split("/")
     .filter(Boolean);
 
-  if (parts.length < 2) {
+  if (parts.length < 2 || parts.length > 3) {
+    return null;
+  }
+
+  if (parts.length === 3 && parts[0].toLowerCase() !== "github.com") {
     return null;
   }
 
@@ -214,10 +218,40 @@ export function readPatToken(account) {
   return token;
 }
 
+// An unparseable selector can still be a URL carrying a real credential
+// (`https://x-access-token:TOKEN@host/...`) — strip it before the value is echoed back
+// in an error message, so a bad selector never leaks a secret into stderr/logs.
+function redactCredentials(value) {
+  try {
+    const url = new URL(value);
+
+    url.username = "";
+    url.password = "";
+
+    return url.toString();
+  } catch {
+    return value.replace(/:\/\/[^/\s]*@/, "://[redacted]@");
+  }
+}
+
+function resolveOwnerSelector(rawValue, label) {
+  if (!rawValue) {
+    return null;
+  }
+
+  const owner = parseRepositoryOwner(rawValue);
+
+  if (!owner) {
+    fail(`Could not parse a GitHub owner from ${label}: ${redactCredentials(rawValue)}`);
+  }
+
+  return owner;
+}
+
 export function resolveAccount(config, selectors = {}) {
   const explicitAccount = selectors.account ? normalizeAccount(selectors.account) : null;
-  const repositoryOwner = parseRepositoryOwner(selectors.repository);
-  const remoteOwner = parseRepositoryOwner(selectors.remoteUrl);
+  const repositoryOwner = resolveOwnerSelector(selectors.repository, "--repo");
+  const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL");
   const environmentAccount = selectors.environmentAccount
     ? normalizeAccount(selectors.environmentAccount)
     : null;
