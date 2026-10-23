@@ -14,12 +14,12 @@ const SOURCE_FILES = [
   "bin/gh",
   "bin/identity.sh",
   "bin/mint-dispatch-token",
-  "bin/multi-account-git-credential",
+  "bin/git-credential-gh-identity-router",
   "install.sh",
 ];
 
 // Vars this tool deliberately reads/sets from gh's own reserved namespace, plus other
-// known-shaped output vars not under this tool's own MULTI_ACCOUNT_/AGENT_IDENTITY_
+// known-shaped output vars not under this tool's own IDENTITY_ROUTER_/AGENT_IDENTITY_
 // prefixes — expected to appear in source without being this tool's "own" config
 // surface, so they need naming here rather than being caught by the prefix check.
 const KNOWN_VARS = new Set(["GH_REPO", "GH_TOKEN", "DISPATCH_GH_TOKEN"]);
@@ -29,7 +29,7 @@ function varsReferencedIn(file) {
   const found = new Set();
   for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
     const name = m[1];
-    if (name.startsWith("MULTI_ACCOUNT_") || name.startsWith("AGENT_IDENTITY_") || KNOWN_VARS.has(name)) {
+    if (name.startsWith("IDENTITY_ROUTER_") || name.startsWith("AGENT_IDENTITY_") || KNOWN_VARS.has(name)) {
       found.add(name);
     }
   }

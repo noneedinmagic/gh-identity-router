@@ -3,9 +3,18 @@
 > **Pre-release.** v0.1 is not yet published. The `bin`/`src` layout, config schema,
 > and environment variable names described here reflect this repo's *current*
 > behavior (extracted from an earlier, private tool) and are expected to change
-> before the first npm release — in particular the `MULTI_ACCOUNT_*` env vars and
-> `~/.config/gh-multi-account/` paths below will be renamed. See open issues for
-> what's planned. APIs and schema may change without notice until v0.1 ships.
+> before the first npm release. See open issues for what's planned. APIs and schema
+> may change without notice until v0.1 ships.
+>
+> Upgrading from the earlier `gh-multi-account` names: env vars are now
+> `IDENTITY_ROUTER_*`, state lives under `gh-identity-router/` directories
+> (`~/.config`, `~/.local/share`, `~/.local/state`), and the Git credential helper is
+> `git-credential-gh-identity-router`. Move your old config directory over, then
+> update the absolute `privateKeyPath` and any PAT `tokenPath` values in its
+> `config.json` (they still point under `~/.config/gh-multi-account`), e.g.
+> `sed -i 's#/gh-multi-account/#/gh-identity-router/#g' ~/.config/gh-identity-router/config.json`.
+> Then re-run `./install.sh`; remove the stale `~/.local/bin/multi-account-git-credential`
+> by hand.
 
 Any coding-agent identity can be backed by its own GitHub App, with a distinct
 installation on each GitHub account it needs to act on. Each installation has its own
@@ -15,9 +24,9 @@ from the target repository owner.
 Two identities on one machine can both need to reach the same accounts — say, a
 personal installation on `your-user` and an organization installation on `your-org`.
 Each identity runs its own copy of this tool, with its own App, private key, and
-`~/.config/gh-multi-account/config.json`. Configuration and credentials are per-home,
+`~/.config/gh-identity-router/config.json`. Configuration and credentials are per-home,
 uncommitted, and never belong in this repository. If two identities share one Unix
-home instead, they must provide distinct config paths with `MULTI_ACCOUNT_CONFIG`.
+home instead, they must provide distinct config paths with `IDENTITY_ROUTER_CONFIG`.
 
 ## Identity isolation: what this tool does and doesn't cover
 
@@ -63,7 +72,7 @@ A legacy single-installation config already contains the App ID and private-key 
 Use it to discover every installation without minting or printing a token:
 
 ```bash
-MULTI_ACCOUNT_CONFIG=~/.config/gh-multi-account/config-alt.json \
+IDENTITY_ROUTER_CONFIG=~/.config/gh-identity-router/config-alt.json \
   ./src/multi-account-token.mjs --discover-installations
 ```
 
@@ -71,7 +80,7 @@ The command prints login, numeric account and installation IDs, target type,
 repository selection, and active/suspended state. Copy `config.example.json` to:
 
 ```text
-~/.config/gh-multi-account/config.json
+~/.config/gh-identity-router/config.json
 ```
 
 Populate it with the discovered IDs. Reuse the existing private-key path; do not copy
@@ -79,7 +88,7 @@ the key. `your-user` is a `User`; `your-org` is an `Organization`. Keep account 
 lowercase and set private permissions on both config and key files:
 
 ```bash
-chmod 600 ~/.config/gh-multi-account/config.json
+chmod 600 ~/.config/gh-identity-router/config.json
 chmod 600 /path/from/privateKeyPath
 ```
 
@@ -105,7 +114,7 @@ should always set `"type": "pat"` explicitly.
   `chmod 600` (or equivalent), same as the private key:
 
   ```bash
-  install -m 600 /dev/stdin ~/.config/gh-multi-account/tokens/contractor-org.token <<<"github_pat_..."
+  install -m 600 /dev/stdin ~/.config/gh-identity-router/tokens/contractor-org.token <<<"github_pat_..."
   ```
 
 - **`defaultAccount` must stay App-typed whenever the config also has an App-typed
@@ -144,15 +153,18 @@ installing:
 The installer repeats live verification before any mutation, backs up replaced files
 and the exact targeted Git credential settings, installs the helpers, and verifies
 again. A post-mutation failure triggers automatic restoration. Backups live under
-`~/.local/state/gh-multi-account/backups/<timestamp>-<pid>/`. The installer never
+`~/.local/state/gh-identity-router/backups/<timestamp>-<pid>/`. The installer never
 creates, overwrites, or backs up the live config or private key.
 
 It also installs `identity.sh` into `~/.local/bin` and its Node implementation,
-`identity.mjs`, into `~/.local/share/gh-multi-account/`, so `identity.sh --footer`
+`identity.mjs`, into `~/.local/share/gh-identity-router/`, so `identity.sh --footer`
 works without a checkout. A backup taken by an earlier installer has no record of those
 two files; restoring it treats them as absent and removes them.
 
-It configures Git to include the repository path in credential-helper requests:
+It installs the credential helper as `~/.local/bin/git-credential-gh-identity-router`
+and registers it by absolute path, so Git finds it without `~/.local/bin` on `PATH`. It
+also configures Git to include the repository path in
+credential-helper requests:
 
 ```ini
 credential.https://github.com.useHttpPath=true
@@ -168,7 +180,7 @@ For `gh`, selection order is:
 1. `-R` or `--repo`
 2. `GH_REPO`
 3. the current repository's `origin` URL
-4. `MULTI_ACCOUNT_ORG`
+4. `IDENTITY_ROUTER_ORG`
 5. `defaultAccount`
 
 Examples:
@@ -177,7 +189,7 @@ Examples:
 gh pr list --repo your-org/example
 GH_REPO=your-org/example gh pr list
 cd /path/to/a/your-org/clone && gh repo view
-MULTI_ACCOUNT_ORG=your-org gh api /orgs/your-org
+IDENTITY_ROUTER_ORG=your-org gh api /orgs/your-org
 ```
 
 If a repository owner is detected but is not allow-listed, the command fails. It does
@@ -255,19 +267,19 @@ complete repository inventory across configured users and organizations.
 When the requested scope is "all accessible repositories", read the account names
 from the `accounts` object in the local allow-list and query each one explicitly. Run
 account-selected commands outside a Git worktree — the current repository's `origin`
-has higher selection precedence than `MULTI_ACCOUNT_ORG` by design.
+has higher selection precedence than `IDENTITY_ROUTER_ORG` by design.
 
 ```bash
 (
   cd /tmp
-  MULTI_ACCOUNT_ORG=your-user \
+  IDENTITY_ROUTER_ORG=your-user \
     gh api --paginate '/installation/repositories?per_page=100' \
     --jq '.repositories[].full_name'
 )
 
 (
   cd /tmp
-  MULTI_ACCOUNT_ORG=your-org \
+  IDENTITY_ROUTER_ORG=your-org \
     gh api --paginate '/installation/repositories?per_page=100' \
     --jq '.repositories[].full_name'
 )
@@ -308,10 +320,12 @@ account and describe the inventory as incomplete. Do not fall back to
 The successful installer prints the exact restore command:
 
 ```bash
-./install.sh --restore ~/.local/state/gh-multi-account/backups/TIMESTAMP-PID
+./install.sh --restore ~/.local/state/gh-identity-router/backups/TIMESTAMP-PID
 ```
 
 Restore accepts only a valid manifest below the current home's managed backup root.
+Backups taken before the rename (under `~/.local/state/gh-multi-account/backups`) are
+also accepted and restore the old helper and share-directory paths.
 It restores the exact prior files and values (including absent and empty Git
 settings) for `credential.https://github.com.{helper,username,useHttpPath}`. It does
 not change the live config or private key.

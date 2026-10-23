@@ -5,12 +5,15 @@ set -euo pipefail
 tool_dir="$(cd "$(dirname "$0")" && pwd)"
 user_home="${HOME:?HOME is not set}"
 bin_dir="$user_home/.local/bin"
-share_dir="$user_home/.local/share/gh-multi-account"
-state_dir="$user_home/.local/state/gh-multi-account"
+share_dir="$user_home/.local/share/gh-identity-router"
+state_dir="$user_home/.local/state/gh-identity-router"
+# Pre-rename (gh-multi-account) locations, honored only when restoring an old backup.
+legacy_state_dir="$user_home/.local/state/gh-multi-account"
+legacy_share_dir="$user_home/.local/share/gh-multi-account"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_dir="$state_dir/backups/$timestamp-$$"
-config_path="${MULTI_ACCOUNT_CONFIG:-$user_home/.config/gh-multi-account/config.json}"
-verify_command="${MULTI_ACCOUNT_VERIFY_COMMAND:-$tool_dir/src/multi-account-token.mjs}"
+config_path="${IDENTITY_ROUTER_CONFIG:-$user_home/.config/gh-identity-router/config.json}"
+verify_command="${IDENTITY_ROUTER_VERIFY_COMMAND:-$tool_dir/src/multi-account-token.mjs}"
 dry_run=false
 restore_dir=""
 
@@ -35,7 +38,7 @@ legacy_missing_ok_names=(
 target_paths=(
   "$bin_dir/gh"
   "$bin_dir/multi-account-token"
-  "$bin_dir/multi-account-git-credential"
+  "$bin_dir/git-credential-gh-identity-router"
   "$bin_dir/mint-dispatch-token"
   "$share_dir/multi-account-token.mjs"
   "$share_dir/config.example.json"
@@ -109,6 +112,7 @@ restore_git_config() {
 resolve_backup_dir() {
   local selected_backup="$1"
   local backups_root
+  local legacy_backups_root
   local resolved_backup
 
   if [[ ! -d "$selected_backup" ]]; then
@@ -117,10 +121,11 @@ resolve_backup_dir() {
   fi
 
   backups_root="$(realpath -m -- "$state_dir/backups")"
+  legacy_backups_root="$(realpath -m -- "$legacy_state_dir/backups")"
   resolved_backup="$(realpath -- "$selected_backup")"
 
   case "$resolved_backup" in
-    "$backups_root"/*) printf '%s\n' "$resolved_backup" ;;
+    "$backups_root"/*|"$legacy_backups_root"/*) printf '%s\n' "$resolved_backup" ;;
     *)
       echo "Refusing backup outside $backups_root" >&2
       return 1
@@ -133,14 +138,26 @@ restore_backup() {
   local index
   local name
   local target
+  local manifest=""
+  local restore_paths=("${target_paths[@]}")
 
   selected_backup="$(resolve_backup_dir "$1")"
 
-  if [[ ! -f "$selected_backup/manifest.version" ]] \
-    || [[ "$(<"$selected_backup/manifest.version")" != "gh-multi-account-backup-v1" ]]; then
-    echo "Invalid gh-multi-account backup: $selected_backup" >&2
-    return 1
-  fi
+  [[ -f "$selected_backup/manifest.version" ]] && manifest="$(<"$selected_backup/manifest.version")"
+  case "$manifest" in
+    gh-identity-router-backup-v1) ;;
+    gh-multi-account-backup-v1)
+      # Pre-rename backup: the renamed targets lived at their old paths.
+      restore_paths[2]="$bin_dir/multi-account-git-credential"
+      restore_paths[4]="$legacy_share_dir/multi-account-token.mjs"
+      restore_paths[5]="$legacy_share_dir/config.example.json"
+      restore_paths[7]="$legacy_share_dir/identity.mjs"
+      ;;
+    *)
+      echo "Invalid gh-identity-router backup: $selected_backup" >&2
+      return 1
+      ;;
+  esac
 
   if [[ ! -f "$selected_backup/home.path" ]] \
     || [[ "$(<"$selected_backup/home.path")" != "$user_home" ]]; then
@@ -170,7 +187,7 @@ restore_backup() {
 
   for index in "${!target_names[@]}"; do
     name="${target_names[$index]}"
-    target="${target_paths[$index]}"
+    target="${restore_paths[$index]}"
     mkdir -p "$(dirname "$target")"
 
     if [[ -e "$selected_backup/files/$name" || -L "$selected_backup/files/$name" ]]; then
@@ -195,7 +212,7 @@ restore_backup() {
       "${git_config_keys[$index]}"
   done
 
-  echo "Restored gh-multi-account state from: $selected_backup"
+  echo "Restored gh-identity-router state from: $selected_backup"
 }
 
 create_backup() {
@@ -204,7 +221,7 @@ create_backup() {
   local target
 
   mkdir -p "$backup_dir/files" "$backup_dir/git-config"
-  printf '%s\n' "gh-multi-account-backup-v1" >"$backup_dir/manifest.version"
+  printf '%s\n' "gh-identity-router-backup-v1" >"$backup_dir/manifest.version"
   printf '%s\n' "$user_home" >"$backup_dir/home.path"
 
   for index in "${!target_names[@]}"; do
@@ -243,7 +260,7 @@ if [[ ! -f "$config_path" ]]; then
   exit 1
 fi
 
-MULTI_ACCOUNT_CONFIG="$config_path" "$verify_command" --verify
+IDENTITY_ROUTER_CONFIG="$config_path" "$verify_command" --verify
 create_backup
 
 rollback_needed=true
@@ -264,7 +281,7 @@ trap on_error ERR
 mkdir -p "$bin_dir" "$share_dir"
 
 install -m 0755 "$tool_dir/bin/gh" "$bin_dir/gh"
-install -m 0755 "$tool_dir/bin/multi-account-git-credential" "$bin_dir/multi-account-git-credential"
+install -m 0755 "$tool_dir/bin/git-credential-gh-identity-router" "$bin_dir/git-credential-gh-identity-router"
 install -m 0755 "$tool_dir/bin/mint-dispatch-token" "$bin_dir/mint-dispatch-token"
 install -m 0755 "$tool_dir/src/multi-account-token.mjs" "$share_dir/multi-account-token.mjs"
 install -m 0755 "$tool_dir/bin/identity.sh" "$bin_dir/identity.sh"
@@ -276,25 +293,25 @@ trap 'rm -f "$token_launcher"' EXIT
 {
   echo '#!/usr/bin/env bash'
   echo 'set -euo pipefail'
-  echo 'exec "$HOME/.local/share/gh-multi-account/multi-account-token.mjs" "$@"'
+  echo 'exec "$HOME/.local/share/gh-identity-router/multi-account-token.mjs" "$@"'
 } >"$token_launcher"
 install -m 0755 "$token_launcher" "$bin_dir/multi-account-token"
 
 git config --global --unset-all credential.https://github.com.helper 2>/dev/null || true
 git config --global --add credential.https://github.com.helper ""
-git config --global --add credential.https://github.com.helper "$bin_dir/multi-account-git-credential"
+git config --global --add credential.https://github.com.helper "$bin_dir/git-credential-gh-identity-router"
 git config --global credential.https://github.com.username x-access-token
 git config --global credential.https://github.com.useHttpPath true
 
-if [[ -n "${MULTI_ACCOUNT_VERIFY_COMMAND:-}" ]]; then
-  MULTI_ACCOUNT_CONFIG="$config_path" "$MULTI_ACCOUNT_VERIFY_COMMAND" --verify
+if [[ -n "${IDENTITY_ROUTER_VERIFY_COMMAND:-}" ]]; then
+  IDENTITY_ROUTER_CONFIG="$config_path" "$IDENTITY_ROUTER_VERIFY_COMMAND" --verify
 else
-  MULTI_ACCOUNT_CONFIG="$config_path" "$bin_dir/multi-account-token" --verify
+  IDENTITY_ROUTER_CONFIG="$config_path" "$bin_dir/multi-account-token" --verify
 fi
 
 rollback_needed=false
 trap - ERR
 
-echo "Installed gh-multi-account-credentials helpers."
+echo "Installed gh-identity-router helpers."
 echo "Existing files and Git credential settings were backed up to: $backup_dir"
 echo "Restore with: $0 --restore $backup_dir"

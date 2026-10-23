@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-token_command="${MULTI_ACCOUNT_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-token}"
+token_command="${IDENTITY_ROUTER_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-token}"
 repo="${1:?Usage: mint-dispatch-token OWNER/REPO}"
 
 if [[ "$repo" != */* ]]; then

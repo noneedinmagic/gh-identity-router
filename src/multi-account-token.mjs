@@ -288,7 +288,7 @@ async function timedFetch(fetchImpl, url, bearerToken, options = {}) {
         "Accept": "application/vnd.github+json",
         "Authorization": `Bearer ${bearerToken}`,
         "X-GitHub-Api-Version": API_VERSION,
-        "User-Agent": "gh-multi-account-credentials",
+        "User-Agent": "gh-identity-router",
         ...options.headers
       }
     });
@@ -621,8 +621,8 @@ function readPrivateKey(privateKeyPath) {
 
 async function main() {
   const args = parseArguments(process.argv.slice(2));
-  const configPath = process.env.MULTI_ACCOUNT_CONFIG
-    ?? path.join(os.homedir(), ".config", "gh-multi-account", "config.json");
+  const configPath = process.env.IDENTITY_ROUTER_CONFIG
+    ?? path.join(os.homedir(), ".config", "gh-identity-router", "config.json");
   const rawConfig = readJsonConfig(configPath);
   assertPrivateFile(configPath, "Config file");
 
@@ -692,7 +692,7 @@ async function main() {
 
   const account = resolveAccount(config, {
     ...args,
-    environmentAccount: process.env.MULTI_ACCOUNT_ORG
+    environmentAccount: process.env.IDENTITY_ROUTER_ORG
   });
 
   if (account.type === "pat" && (args.repositories || args.permissions)) {
