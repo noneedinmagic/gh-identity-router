@@ -1,7 +1,7 @@
 # Design: an account entry holds an identity block and a credential block, each optional
 
 **Status: planned for v0.1, not yet implemented.** This document describes the target
-schema; the current code (`src/multi-account-token.mjs`, `bin/identity.sh`) still uses
+schema; the current code (`src/multi-account-token.mjs`, `src/identity.mjs`) still uses
 the older shape described in the rest of this repo's docs (a single top-level App pair,
 and a separate per-`$HOME` `~/.agent-identity` file). See the open issues for the
 concrete work items that will implement this.
@@ -84,11 +84,13 @@ break, not a migration path: once this ships, there is no code path that reads a
 per-`$HOME` identity file. An existing host migrates its declared identity into its
 account entries' `identity` blocks once, at cutover.
 
-The identity comparison and footer-rendering logic move into the same module that
-already resolves accounts, since both now read the same per-owner config.
-`bin/identity.sh` becomes a thin POSIX-sh shim that calls the installed package and
-keeps its own flags (`--footer`, `--check`, `--self-check`) working for existing
-callers.
+The identity comparison and footer-rendering logic already moved into `src/identity.mjs`
+(a sibling of `src/multi-account-token.mjs`, not a merge into it — see the issue that
+shipped that port), with `bin/identity.sh` now a thin POSIX-sh shim that keeps its own
+flags (`--footer`, `--check`, `--self-check`) working for existing callers. What lands
+with *this* schema is `src/identity.mjs` reading `identity` blocks from the same
+per-owner config `src/multi-account-token.mjs` resolves accounts from, instead of the
+retired per-`$HOME` file.
 
 ## What this deliberately does not do
 

@@ -7,8 +7,8 @@ Every variable the code actually reads or sets, with a one-line purpose. A test
 
 | Variable | Read in | Purpose |
 |---|---|---|
-| `AGENT_IDENTITY_FILE` | `bin/identity.sh` | Overrides the declared-identity file path (default `$HOME/.agent-identity`). |
-| `AGENT_IDENTITY_GH_BIN` | `bin/identity.sh` | Overrides the `gh` binary used to derive the acting credential — lets tests substitute a fixture without touching the real `gh`. |
+| `AGENT_IDENTITY_FILE` | `src/identity.mjs` | Overrides the declared-identity file path (default `$HOME/.agent-identity`). |
+| `AGENT_IDENTITY_GH_BIN` | `src/identity.mjs` | Overrides the `gh` binary used to derive the acting credential — lets tests substitute a fixture without touching the real `gh`. |
 | `GH_REPO` | `bin/gh` | Selects the target repository owner when `--repo`/`-R` isn't passed explicitly. |
 | `MULTI_ACCOUNT_CONFIG` | `src/multi-account-token.mjs`, `install.sh` | Overrides the config file path (default `~/.config/gh-multi-account/config.json`). |
 | `MULTI_ACCOUNT_ORG` | `src/multi-account-token.mjs` | Selects the target account when no `--repo`/`GH_REPO`/git-remote owner can be resolved. |

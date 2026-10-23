@@ -10,6 +10,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const SOURCE_FILES = [
   "src/multi-account-token.mjs",
+  "src/identity.mjs",
   "bin/gh",
   "bin/identity.sh",
   "bin/mint-dispatch-token",
