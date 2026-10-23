@@ -605,7 +605,7 @@ test("--discover-installations fails cleanly on a config with no App", () => {
   }), { mode: 0o600 });
 
   const result = spawnSync(process.execPath, [scriptPath, "--discover-installations"], {
-    env: { ...process.env, MULTI_ACCOUNT_CONFIG: configPath },
+    env: { ...process.env, IDENTITY_ROUTER_CONFIG: configPath },
     encoding: "utf8"
   });
 
@@ -632,7 +632,7 @@ test("--repositories/--permissions on a PAT-typed account fails rather than mint
   const result = spawnSync(
     process.execPath,
     [scriptPath, "--account", "example-org-two", "--repositories", "repo-a"],
-    { env: { ...process.env, MULTI_ACCOUNT_CONFIG: configPath }, encoding: "utf8" }
+    { env: { ...process.env, IDENTITY_ROUTER_CONFIG: configPath }, encoding: "utf8" }
   );
 
   assert.ifError(result.error);

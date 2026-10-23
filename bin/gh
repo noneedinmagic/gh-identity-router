@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-real_gh="${MULTI_ACCOUNT_REAL_GH:-/usr/bin/gh}"
-token_command="${MULTI_ACCOUNT_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-token}"
+real_gh="${IDENTITY_ROUTER_REAL_GH:-/usr/bin/gh}"
+token_command="${IDENTITY_ROUTER_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-token}"
 
 if [[ ! -x "$real_gh" ]]; then
   echo "Real gh binary not found at $real_gh" >&2
