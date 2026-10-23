@@ -21,6 +21,16 @@ target_names=(
   bin-mint-dispatch-token
   share-token
   share-example
+  bin-identity
+  share-identity
+)
+# Targets added after backup format v1 shipped. A backup taken before they existed has
+# no file state for them; restore treats that as "was absent" instead of failing.
+# ponytail: a damaged new backup missing these entries also reads as absent; add a
+# per-backup target list to the manifest if that ever matters.
+legacy_missing_ok_names=(
+  bin-identity
+  share-identity
 )
 target_paths=(
   "$bin_dir/gh"
@@ -29,6 +39,8 @@ target_paths=(
   "$bin_dir/mint-dispatch-token"
   "$share_dir/multi-account-token.mjs"
   "$share_dir/config.example.json"
+  "$bin_dir/identity.sh"
+  "$share_dir/identity.mjs"
 )
 git_config_names=(
   helper
@@ -74,6 +86,14 @@ if "$dry_run" && [[ -n "$restore_dir" ]]; then
   usage
   exit 2
 fi
+
+is_legacy_missing_ok() {
+  local candidate
+  for candidate in "${legacy_missing_ok_names[@]}"; do
+    [[ "$candidate" == "$1" ]] && return 0
+  done
+  return 1
+}
 
 restore_git_config() {
   local values_file="$1"
@@ -133,7 +153,8 @@ restore_backup() {
     name="${target_names[$index]}"
     if [[ ! -e "$selected_backup/files/$name" ]] \
       && [[ ! -L "$selected_backup/files/$name" ]] \
-      && [[ ! -f "$selected_backup/files/$name.absent" ]]; then
+      && [[ ! -f "$selected_backup/files/$name.absent" ]] \
+      && ! is_legacy_missing_ok "$name"; then
       echo "Backup is missing file state for $name" >&2
       return 1
     fi
@@ -155,7 +176,7 @@ restore_backup() {
     if [[ -e "$selected_backup/files/$name" || -L "$selected_backup/files/$name" ]]; then
       rm -f -- "$target"
       cp -a "$selected_backup/files/$name" "$target"
-    elif [[ -f "$selected_backup/files/$name.absent" ]]; then
+    elif [[ -f "$selected_backup/files/$name.absent" ]] || is_legacy_missing_ok "$name"; then
       rm -f -- "$target"
     else
       echo "Backup is missing file state for $name" >&2
@@ -246,6 +267,8 @@ install -m 0755 "$tool_dir/bin/gh" "$bin_dir/gh"
 install -m 0755 "$tool_dir/bin/multi-account-git-credential" "$bin_dir/multi-account-git-credential"
 install -m 0755 "$tool_dir/bin/mint-dispatch-token" "$bin_dir/mint-dispatch-token"
 install -m 0755 "$tool_dir/src/multi-account-token.mjs" "$share_dir/multi-account-token.mjs"
+install -m 0755 "$tool_dir/bin/identity.sh" "$bin_dir/identity.sh"
+install -m 0644 "$tool_dir/src/identity.mjs" "$share_dir/identity.mjs"
 install -m 0644 "$tool_dir/config.example.json" "$share_dir/config.example.json"
 
 token_launcher="$(mktemp)"
