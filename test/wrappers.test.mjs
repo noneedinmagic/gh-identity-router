@@ -324,9 +324,34 @@ test("installer resets inherited credential helpers for github.com", () => {
 
   assert.deepEqual(
     gitConfigValues(fixture.home, "credential.https://github.com.helper"),
-    ["", "gh-identity-router"]
+    ["", path.join(fixture.home, ".local", "bin", "git-credential-gh-identity-router")]
   );
   assert.deepEqual(gitConfigValues(fixture.home, "credential.helper"), ["store"]);
+});
+
+test("restore accepts a pre-rename backup and puts the old paths back", () => {
+  const fixture = installerFixture("multi-account-install-prerename-restore-");
+  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+    encoding: "utf8",
+    env: fixture.env
+  });
+  const backupDir = backupPathFrom(output);
+  const stateRoot = path.join(fixture.home, ".local", "state");
+  const legacyBackup = path.join(stateRoot, "gh-multi-account", "backups", path.basename(backupDir));
+
+  // Rebuild the backup as the pre-rename installer would have written it.
+  fs.mkdirSync(path.dirname(legacyBackup), { recursive: true });
+  fs.renameSync(backupDir, legacyBackup);
+  fs.writeFileSync(path.join(legacyBackup, "manifest.version"), "gh-multi-account-backup-v1\n");
+  fs.writeFileSync(path.join(legacyBackup, "files", "bin-credential"), "old helper\n");
+  fs.unlinkSync(path.join(legacyBackup, "files", "bin-credential.absent"));
+
+  execFileSync(path.join(toolDir, "install.sh"), ["--restore", legacyBackup], { env: fixture.env });
+
+  assert.equal(
+    fs.readFileSync(path.join(fixture.home, ".local", "bin", "multi-account-git-credential"), "utf8"),
+    "old helper\n"
+  );
 });
 
 test("installer installs mint-dispatch-token alongside the other wrappers", () => {

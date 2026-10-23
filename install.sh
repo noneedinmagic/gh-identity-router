@@ -7,6 +7,9 @@ user_home="${HOME:?HOME is not set}"
 bin_dir="$user_home/.local/bin"
 share_dir="$user_home/.local/share/gh-identity-router"
 state_dir="$user_home/.local/state/gh-identity-router"
+# Pre-rename (gh-multi-account) locations, honored only when restoring an old backup.
+legacy_state_dir="$user_home/.local/state/gh-multi-account"
+legacy_share_dir="$user_home/.local/share/gh-multi-account"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_dir="$state_dir/backups/$timestamp-$$"
 config_path="${IDENTITY_ROUTER_CONFIG:-$user_home/.config/gh-identity-router/config.json}"
@@ -109,6 +112,7 @@ restore_git_config() {
 resolve_backup_dir() {
   local selected_backup="$1"
   local backups_root
+  local legacy_backups_root
   local resolved_backup
 
   if [[ ! -d "$selected_backup" ]]; then
@@ -117,10 +121,11 @@ resolve_backup_dir() {
   fi
 
   backups_root="$(realpath -m -- "$state_dir/backups")"
+  legacy_backups_root="$(realpath -m -- "$legacy_state_dir/backups")"
   resolved_backup="$(realpath -- "$selected_backup")"
 
   case "$resolved_backup" in
-    "$backups_root"/*) printf '%s\n' "$resolved_backup" ;;
+    "$backups_root"/*|"$legacy_backups_root"/*) printf '%s\n' "$resolved_backup" ;;
     *)
       echo "Refusing backup outside $backups_root" >&2
       return 1
@@ -133,14 +138,25 @@ restore_backup() {
   local index
   local name
   local target
+  local manifest=""
+  local restore_paths=("${target_paths[@]}")
 
   selected_backup="$(resolve_backup_dir "$1")"
 
-  if [[ ! -f "$selected_backup/manifest.version" ]] \
-    || [[ "$(<"$selected_backup/manifest.version")" != "gh-identity-router-backup-v1" ]]; then
-    echo "Invalid gh-identity-router backup: $selected_backup" >&2
-    return 1
-  fi
+  [[ -f "$selected_backup/manifest.version" ]] && manifest="$(<"$selected_backup/manifest.version")"
+  case "$manifest" in
+    gh-identity-router-backup-v1) ;;
+    gh-multi-account-backup-v1)
+      # Pre-rename backup: the renamed targets lived at their old paths.
+      restore_paths[2]="$bin_dir/multi-account-git-credential"
+      restore_paths[4]="$legacy_share_dir/multi-account-token.mjs"
+      restore_paths[5]="$legacy_share_dir/config.example.json"
+      ;;
+    *)
+      echo "Invalid gh-identity-router backup: $selected_backup" >&2
+      return 1
+      ;;
+  esac
 
   if [[ ! -f "$selected_backup/home.path" ]] \
     || [[ "$(<"$selected_backup/home.path")" != "$user_home" ]]; then
@@ -170,7 +186,7 @@ restore_backup() {
 
   for index in "${!target_names[@]}"; do
     name="${target_names[$index]}"
-    target="${target_paths[$index]}"
+    target="${restore_paths[$index]}"
     mkdir -p "$(dirname "$target")"
 
     if [[ -e "$selected_backup/files/$name" || -L "$selected_backup/files/$name" ]]; then
@@ -282,7 +298,7 @@ install -m 0755 "$token_launcher" "$bin_dir/multi-account-token"
 
 git config --global --unset-all credential.https://github.com.helper 2>/dev/null || true
 git config --global --add credential.https://github.com.helper ""
-git config --global --add credential.https://github.com.helper gh-identity-router
+git config --global --add credential.https://github.com.helper "$bin_dir/git-credential-gh-identity-router"
 git config --global credential.https://github.com.username x-access-token
 git config --global credential.https://github.com.useHttpPath true
 
@@ -294,11 +310,6 @@ fi
 
 rollback_needed=false
 trap - ERR
-
-case ":$PATH:" in
-  *":$bin_dir:"*) ;;
-  *) echo "Warning: $bin_dir is not on PATH; Git cannot find git-credential-gh-identity-router until it is." >&2 ;;
-esac
 
 echo "Installed gh-identity-router helpers."
 echo "Existing files and Git credential settings were backed up to: $backup_dir"

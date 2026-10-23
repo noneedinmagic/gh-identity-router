@@ -159,9 +159,8 @@ works without a checkout. A backup taken by an earlier installer has no record o
 two files; restoring it treats them as absent and removes them.
 
 It installs the credential helper as `~/.local/bin/git-credential-gh-identity-router`
-and registers it by its bare name (`credential.helper=gh-identity-router`), which Git
-resolves on `PATH` — so `~/.local/bin` must be on `PATH` wherever Git runs. The
-installer warns if it isn't. It also configures Git to include the repository path in
+and registers it by absolute path, so Git finds it without `~/.local/bin` on `PATH`. It
+also configures Git to include the repository path in
 credential-helper requests:
 
 ```ini
@@ -322,6 +321,8 @@ The successful installer prints the exact restore command:
 ```
 
 Restore accepts only a valid manifest below the current home's managed backup root.
+Backups taken before the rename (under `~/.local/state/gh-multi-account/backups`) are
+also accepted and restore the old helper and share-directory paths.
 It restores the exact prior files and values (including absent and empty Git
 settings) for `credential.https://github.com.{helper,username,useHttpPath}`. It does
 not change the live config or private key.
