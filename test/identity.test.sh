@@ -193,4 +193,11 @@ echo "OK: bare block warns about an unfilled <placeholder> in the identity file"
 # this package's snapshot — that's a per-consuming-project integration, wired
 # up separately for each project's own config path.
 
+# Invoked through a symlink (relative, chained), the shim must still find src/identity.mjs.
+mkdir -p "$tmp/link-a" "$tmp/link-b"
+ln -s "$SCRIPT" "$tmp/link-a/identity.sh"
+ln -s ../link-a/identity.sh "$tmp/link-b/identity.sh"
+link_out="$("$tmp/link-b/identity.sh" --self-check 2>&1)" || fail "symlinked identity.sh failed: $link_out"
+echo "OK: shim resolves src/identity.mjs through a chained symlink"
+
 echo "all identity.sh / pre-push checks passed"

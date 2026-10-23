@@ -7,5 +7,14 @@
 # the port.
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Follow symlinks so a linked invocation resolves src/ relative to the real script.
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink -- "$self")
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+  esac
+done
+script_dir=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd)
 exec node "$script_dir/../src/identity.mjs" "$@"
