@@ -345,8 +345,15 @@ test("restore accepts a pre-rename backup and puts the old paths back", () => {
   fs.writeFileSync(path.join(legacyBackup, "manifest.version"), "gh-multi-account-backup-v1\n");
   fs.writeFileSync(path.join(legacyBackup, "files", "bin-credential"), "old helper\n");
   fs.unlinkSync(path.join(legacyBackup, "files", "bin-credential.absent"));
+  fs.writeFileSync(path.join(legacyBackup, "files", "share-identity"), "old identity module\n");
+  fs.rmSync(path.join(legacyBackup, "files", "share-identity.absent"), { force: true });
 
   execFileSync(path.join(toolDir, "install.sh"), ["--restore", legacyBackup], { env: fixture.env });
+
+  assert.equal(
+    fs.readFileSync(path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs"), "utf8"),
+    "old identity module\n"
+  );
 
   assert.equal(
     fs.readFileSync(path.join(fixture.home, ".local", "bin", "multi-account-git-credential"), "utf8"),

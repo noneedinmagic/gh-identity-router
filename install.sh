@@ -151,6 +151,7 @@ restore_backup() {
       restore_paths[2]="$bin_dir/multi-account-git-credential"
       restore_paths[4]="$legacy_share_dir/multi-account-token.mjs"
       restore_paths[5]="$legacy_share_dir/config.example.json"
+      restore_paths[7]="$legacy_share_dir/identity.mjs"
       ;;
     *)
       echo "Invalid gh-identity-router backup: $selected_backup" >&2
