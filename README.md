@@ -147,6 +147,11 @@ again. A post-mutation failure triggers automatic restoration. Backups live unde
 `~/.local/state/gh-multi-account/backups/<timestamp>-<pid>/`. The installer never
 creates, overwrites, or backs up the live config or private key.
 
+It also installs `identity.sh` into `~/.local/bin` and its Node implementation,
+`identity.mjs`, into `~/.local/share/gh-multi-account/`, so `identity.sh --footer`
+works without a checkout. A backup taken by an earlier installer has no record of those
+two files; restoring it treats them as absent and removes them.
+
 It configures Git to include the repository path in credential-helper requests:
 
 ```ini

@@ -339,6 +339,49 @@ test("installer installs mint-dispatch-token alongside the other wrappers", () =
   assert.equal(fs.statSync(installedPath).mode & 0o111, 0o111);
 });
 
+test("installed identity.sh runs from the installed layout, not just a checkout", () => {
+  const fixture = installerFixture("multi-account-install-identity-");
+
+  execFileSync(path.join(toolDir, "install.sh"), [], { env: fixture.env });
+
+  // Run the installed copy only: no checkout path is reachable from it.
+  const installed = path.join(fixture.home, ".local", "bin", "identity.sh");
+  const result = spawnSync(installed, ["--self-check"], { encoding: "utf8", env: fixture.env });
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(
+    fs.existsSync(path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs")),
+    true
+  );
+});
+
+test("restoring a backup from before identity was installed removes it and still succeeds", () => {
+  const fixture = installerFixture("multi-account-install-legacy-restore-");
+  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+    encoding: "utf8",
+    env: fixture.env
+  });
+  const backupDir = backupPathFrom(output);
+  const installedIdentity = [
+    path.join(fixture.home, ".local", "bin", "identity.sh"),
+    path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs")
+  ];
+
+  // Simulate the previous installer's backup: no file state for the identity targets.
+  fs.unlinkSync(path.join(backupDir, "files", "bin-identity.absent"));
+  fs.unlinkSync(path.join(backupDir, "files", "share-identity.absent"));
+  for (const file of installedIdentity) {
+    assert.equal(fs.existsSync(file), true);
+  }
+
+  execFileSync(path.join(toolDir, "install.sh"), ["--restore", backupDir], { env: fixture.env });
+
+  for (const file of installedIdentity) {
+    assert.equal(fs.existsSync(file), false);
+  }
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "gh")), false);
+});
+
 test("installer restores exact files and targeted Git config", () => {
   const fixture = installerFixture("multi-account-install-restore-");
   const oldGh = path.join(fixture.home, ".local", "bin", "gh");
