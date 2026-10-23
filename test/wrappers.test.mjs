@@ -161,6 +161,53 @@ test("gh wrapper selects the current origin when --repo is absent", () => {
   );
 });
 
+function realTokenCommandConfig(prefix) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const configPath = path.join(tempDir, "config.json");
+  const tokenPath = path.join(tempDir, "token");
+
+  fs.writeFileSync(tokenPath, "github_pat_example", { mode: 0o600 });
+  fs.writeFileSync(configPath, JSON.stringify({
+    defaultAccount: "example-org",
+    accounts: {
+      "example-org": { type: "pat", accountId: 1, targetType: "Organization", tokenPath }
+    }
+  }), { mode: 0o600 });
+
+  return {
+    tokenCommand: path.resolve(toolDir, "src", "multi-account-token.mjs"),
+    env: { ...process.env, MULTI_ACCOUNT_CONFIG: configPath }
+  };
+}
+
+test("gh wrapper fails closed on a --repo value that cannot be parsed", () => {
+  const { tokenCommand, env } = realTokenCommandConfig("multi-account-gh-unparseable-");
+  const ghCommand = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-gh-real-")), "gh-real");
+  executable(ghCommand, "#!/usr/bin/env bash\nexit 0\n");
+
+  const result = spawnSync(path.join(toolDir, "bin", "gh"), ["pr", "list", "--repo", "not-a-full-repo"], {
+    encoding: "utf8",
+    env: { ...env, MULTI_ACCOUNT_REAL_GH: ghCommand, MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Could not parse a GitHub owner from --repo: not-a-full-repo/);
+});
+
+test("Git credential helper fails closed on an unparseable credential path", () => {
+  const { tokenCommand, env } = realTokenCommandConfig("multi-account-cred-unparseable-");
+
+  const result = spawnSync(path.join(toolDir, "bin", "multi-account-git-credential"), ["get"], {
+    input: "protocol=https\nhost=github.com\npath=not-a-full-repo\n\n",
+    encoding: "utf8",
+    env: { ...env, MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /Could not parse a GitHub owner from --repo: not-a-full-repo/);
+});
+
 test("Git credential helper uses the owner from the credential path", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-credential-"));
   const logPath = path.join(tempDir, "log");
