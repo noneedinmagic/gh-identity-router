@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SELF = fileURLToPath(import.meta.url);
-const EXCLUDE_DIRS = new Set([".git", "node_modules"]);
+const EXCLUDE_DIRS = new Set([".git", "node_modules", ".claude", ".worktrees"]);
 const EXCLUDE_FILES = new Set([SELF, join(ROOT, ".github", "ai-policy.yml")]);
 
 const PATTERN = /\b(normandy|tali|garrus|af24x|best-time(-biz)?|318730449|constitution)\b/i;
