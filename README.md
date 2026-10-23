@@ -10,7 +10,10 @@
 > `IDENTITY_ROUTER_*`, state lives under `gh-identity-router/` directories
 > (`~/.config`, `~/.local/share`, `~/.local/state`), and the Git credential helper is
 > `git-credential-gh-identity-router`. Move your old config directory over, then
-> re-run `./install.sh`; remove the stale `~/.local/bin/multi-account-git-credential`
+> update the absolute `privateKeyPath` and any PAT `tokenPath` values in its
+> `config.json` (they still point under `~/.config/gh-multi-account`), e.g.
+> `sed -i 's#/gh-multi-account/#/gh-identity-router/#g' ~/.config/gh-identity-router/config.json`.
+> Then re-run `./install.sh`; remove the stale `~/.local/bin/multi-account-git-credential`
 > by hand.
 
 Any coding-agent identity can be backed by its own GitHub App, with a distinct
