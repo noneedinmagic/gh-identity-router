@@ -62,10 +62,10 @@ function fixture(buildAccounts, { defaultAccount = "default-org", actingLogin = 
 }
 
 const matrixAccounts = (tokenFile) => ({
-  "default-org": { accountId: 1, targetType: "Organization", credential: pat(tokenFile("default-org")), identity: agentIdentity },
-  "both-org": { accountId: 2, targetType: "Organization", credential: pat(tokenFile("both-org")), identity: agentIdentity },
-  "cred-org": { accountId: 3, targetType: "Organization", credential: pat(tokenFile("cred-org")) },
-  "ident-org": { accountId: 4, targetType: "Organization", identity: agentIdentity }
+  "default-org": { accountId: 1, targetType: "organization", credential: pat(tokenFile("default-org")), identity: agentIdentity },
+  "both-org": { accountId: 2, targetType: "organization", credential: pat(tokenFile("both-org")), identity: agentIdentity },
+  "cred-org": { accountId: 3, targetType: "organization", credential: pat(tokenFile("cred-org")) },
+  "ident-org": { accountId: 4, targetType: "organization", identity: agentIdentity }
 });
 
 test("credential + identity: a token is minted and the footer prints", () => {
@@ -149,8 +149,8 @@ test("an unresolvable owner routes the token to defaultAccount but never supplie
 
 test("an entry with neither block makes the whole config invalid for both commands", () => {
   const f = fixture((tokenFile) => ({
-    "default-org": { accountId: 1, targetType: "Organization", credential: pat(tokenFile("default-org")) },
-    "empty-org": { accountId: 2, targetType: "Organization" }
+    "default-org": { accountId: 1, targetType: "organization", credential: pat(tokenFile("default-org")) },
+    "empty-org": { accountId: 2, targetType: "organization" }
   }));
   const token = f.token("default-org");
   const footer = f.footer("default-org");
@@ -172,7 +172,7 @@ test("a missing config refuses the footer rather than inventing an identity", ()
 
 test("footerHost: absent falls back to the hostname, empty omits the host clause", () => {
   const withHost = (identity) => fixture((tokenFile) => ({
-    "default-org": { accountId: 1, targetType: "Organization", credential: pat(tokenFile("default-org")), identity }
+    "default-org": { accountId: 1, targetType: "organization", credential: pat(tokenFile("default-org")), identity }
   }));
 
   const absent = withHost({ login: "example-agent" }).footer("default-org");
@@ -186,7 +186,7 @@ test("a PAT machine user is accepted only when its plain login is exactly identi
   const accounts = (tokenFile) => ({
     "default-org": {
       accountId: 1,
-      targetType: "Organization",
+      targetType: "organization",
       credential: pat(tokenFile("default-org")),
       identity: { login: "example-machine", displayName: "Example Machine", footerHost: "" }
     }
@@ -199,7 +199,7 @@ test("a PAT machine user is accepted only when its plain login is exactly identi
 
 test("a plain login with no credential block is refused even when it matches identity.login", () => {
   const f = fixture(() => ({
-    "default-org": { accountId: 1, targetType: "Organization", identity: { login: "example-user", footerHost: "" } }
+    "default-org": { accountId: 1, targetType: "organization", identity: { login: "example-user", footerHost: "" } }
   }), { actingLogin: "example-user" });
   const footer = f.footer("default-org");
 
@@ -211,7 +211,7 @@ test("kind: human is accepted by --check but never gets an agent footer", () => 
   const f = fixture((tokenFile) => ({
     "default-org": {
       accountId: 1,
-      targetType: "Organization",
+      targetType: "organization",
       credential: pat(tokenFile("default-org")),
       identity: { login: "example-user", kind: "human" }
     }

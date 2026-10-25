@@ -80,7 +80,7 @@ write_config() {
   "accounts": {
     "example-org": {
       "accountId": 1,
-      "targetType": "Organization",
+      "targetType": "organization",
       "credential": { "type": "pat", "tokenPath": "$tmp/unused.token" }$identity
     }
   }

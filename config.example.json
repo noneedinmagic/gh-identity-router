@@ -3,7 +3,7 @@
   "accounts": {
     "your-user": {
       "accountId": 12345678,
-      "targetType": "User",
+      "targetType": "user",
       "credential": {
         "type": "app",
         "appId": 123456,
@@ -20,7 +20,7 @@
     },
     "your-org": {
       "accountId": 87654321,
-      "targetType": "Organization",
+      "targetType": "organization",
       "credential": {
         "type": "app",
         "appId": 123456,
@@ -30,7 +30,7 @@
     },
     "contractor-org": {
       "accountId": 900000001,
-      "targetType": "Organization",
+      "targetType": "organization",
       "credential": {
         "type": "pat",
         "tokenPath": "/home/USER/.config/gh-identity-router/tokens/contractor-org.token"
@@ -43,7 +43,7 @@
     },
     "identity-only-org": {
       "accountId": 900000002,
-      "targetType": "Organization",
+      "targetType": "organization",
       "identity": {
         "login": "your-agent",
         "displayName": "Your Agent"
