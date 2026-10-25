@@ -83,8 +83,8 @@ Copy `config.example.json` to:
 
 Each `accounts.<owner>` entry (keys must be lowercase GitHub logins — a mixed-case key is
 rejected with an error, not normalized) has `accountId`,
-`targetType` (`User` or `Organization`), an optional `host` (only `github.com` is
-supported; the field exists so GitHub Enterprise Server can be added later without a
+`targetType` (`user` or `organization`; case-insensitive, stored lowercase), an optional
+`host` (only `github.com` is supported; the field exists so GitHub Enterprise Server can be added later without a
 breaking change), and two independent, optional blocks — at least one is required:
 
 - `credential` — how to get a token for this owner. `type: "app"` takes `appId`,

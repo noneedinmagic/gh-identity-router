@@ -205,6 +205,10 @@ function validateIdentity(name, raw) {
   return identity;
 }
 
+function sameTargetType(githubValue, configured) {
+  return String(githubValue ?? "").toLowerCase() === configured;
+}
+
 export function validateAccountEntry(name, rawEntry) {
   requireObject(rawEntry, `Account ${name}`);
 
@@ -220,8 +224,12 @@ export function validateAccountEntry(name, rawEntry) {
     fail(`Account ${name} needs a credential block, an identity block, or both`);
   }
 
-  if (!["User", "Organization"].includes(rawEntry.targetType)) {
-    fail(`Account ${name} targetType must be User or Organization`);
+  // Case-insensitive on input, stored lowercase; GitHub's capitalised API values are
+  // lowercased at each comparison via sameTargetType().
+  const targetType = typeof rawEntry.targetType === "string" ? rawEntry.targetType.toLowerCase() : undefined;
+
+  if (!["user", "organization"].includes(targetType)) {
+    fail(`Account ${name} targetType must be user or organization, got ${JSON.stringify(rawEntry.targetType)}`);
   }
 
   if (rawEntry.host !== undefined && rawEntry.host !== SUPPORTED_HOST) {
@@ -230,7 +238,7 @@ export function validateAccountEntry(name, rawEntry) {
 
   return {
     accountId: requireNumericId(rawEntry.accountId, `Account ${name} field accountId`),
-    targetType: rawEntry.targetType,
+    targetType,
     host: SUPPORTED_HOST,
     ...(rawEntry.credential !== undefined && { credential: validateCredential(name, rawEntry.credential) }),
     ...(rawEntry.identity !== undefined && { identity: validateIdentity(name, rawEntry.identity) })
@@ -422,7 +430,7 @@ export async function verifyPatAccount(name, account, { fetchImpl = fetch, apiUr
       };
     }
 
-    const ownerPath = account.targetType === "Organization" ? `/orgs/${name}` : `/users/${name}`;
+    const ownerPath = account.targetType === "organization" ? `/orgs/${name}` : `/users/${name}`;
     const ownerResponse = await timedFetch(fetchImpl, `${apiUrl}${ownerPath}`, token);
 
     if (!ownerResponse.ok) {
@@ -435,7 +443,7 @@ export async function verifyPatAccount(name, account, { fetchImpl = fetch, apiUr
 
     const owner = await ownerResponse.json();
 
-    if (Number(owner.id) !== account.accountId || owner.type !== account.targetType) {
+    if (Number(owner.id) !== account.accountId || !sameTargetType(owner.type, account.targetType)) {
       return { name, ok: false, reason: `owner metadata does not match ${name}` };
     }
 
@@ -488,7 +496,7 @@ export async function mintInstallationToken({
     fail(`Installation ${installationId} belongs to ${actualLogin}, not ${account.name}`);
   }
 
-  if (installation.target_type !== account.targetType) {
+  if (!sameTargetType(installation.target_type, account.targetType)) {
     fail(`Installation ${installationId} target type does not match ${account.name}`);
   }
 
@@ -546,7 +554,7 @@ export function classifyInstallations(config, installations) {
     const login = String(installation.account?.login ?? "").toLowerCase();
     const mismatch = Number(installation.account?.id) !== configured.accountId
       || login !== configured.name
-      || installation.target_type !== configured.targetType;
+      || !sameTargetType(installation.target_type, configured.targetType);
 
     if (mismatch) {
       problems.push({ name: configured.name, reason: "installation metadata mismatch" });

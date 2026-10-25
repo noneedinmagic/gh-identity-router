@@ -189,7 +189,7 @@ function realTokenCommandConfig(prefix) {
   fs.writeFileSync(configPath, JSON.stringify({
     defaultAccount: "example-org",
     accounts: {
-      "example-org": { accountId: 1, targetType: "Organization", credential: { type: "pat", tokenPath } }
+      "example-org": { accountId: 1, targetType: "organization", credential: { type: "pat", tokenPath } }
     }
   }), { mode: 0o600 });
 

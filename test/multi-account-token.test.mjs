@@ -34,12 +34,12 @@ const rawConfig = {
   accounts: {
     "example-user": {
       accountId: 1,
-      targetType: "User",
+      targetType: "user",
       credential: { ...appCredential, installationId: 11 }
     },
     "example-org": {
       accountId: 2,
-      targetType: "Organization",
+      targetType: "organization",
       credential: { ...appCredential, installationId: 22 }
     }
   }
@@ -124,8 +124,24 @@ test("validates account configuration", () => {
         "example-org": { ...rawConfig.accounts["example-org"], targetType: "Enterprise" }
       }
     }),
-    /targetType must be User or Organization/
+    /targetType must be user or organization, got "Enterprise"/
   );
+});
+
+test("targetType is case-insensitive on input and stored lowercase", () => {
+  const stored = (targetType) => validateAccountEntry("example-org", { ...rawConfig.accounts["example-org"], targetType }).targetType;
+
+  for (const input of ["organization", "Organization", "ORGANIZATION", "oRgAnIzAtIoN"]) {
+    assert.equal(stored(input), "organization", input);
+  }
+
+  for (const input of ["user", "User", "USER"]) {
+    assert.equal(stored(input), "user", input);
+  }
+
+  for (const input of ["org", "bot", "", 5, null]) {
+    assert.throws(() => stored(input), new RegExp(`got ${JSON.stringify(input).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), String(input));
+  }
 });
 
 test("creates a signed app JWT with the expected claims", () => {
@@ -378,7 +394,7 @@ test("lists all app installations for config discovery", async () => {
 
 const patAccountEntry = {
   accountId: 3,
-  targetType: "Organization",
+  targetType: "organization",
   credential: { type: "pat", tokenPath: "/private/example-org-two.token" }
 };
 
@@ -392,12 +408,12 @@ test("validateAccountEntry accepts a credential only, an identity only, or both"
   const credentialOnly = validateAccountEntry("example-org", rawConfig.accounts["example-org"]);
   assert.deepEqual(credentialOnly, {
     accountId: 2,
-    targetType: "Organization",
+    targetType: "organization",
     host: "github.com",
     credential: { type: "app", appId: "123", privateKeyPath: "/private/key.pem", installationId: 22 }
   });
 
-  const identityOnly = validateAccountEntry("example-org", { accountId: 2, targetType: "Organization", identity: exampleIdentity });
+  const identityOnly = validateAccountEntry("example-org", { accountId: 2, targetType: "organization", identity: exampleIdentity });
   assert.equal(identityOnly.credential, undefined);
   assert.deepEqual(identityOnly.identity, exampleIdentity);
 
@@ -410,14 +426,14 @@ test("validateAccountEntry accepts a credential only, an identity only, or both"
 
 test("validateAccountEntry rejects an entry with neither block", () => {
   assert.throws(
-    () => validateAccountEntry("example-org", { accountId: 2, targetType: "Organization" }),
+    () => validateAccountEntry("example-org", { accountId: 2, targetType: "organization" }),
     /Account example-org needs a credential block, an identity block, or both/
   );
 });
 
 test("validateAccountEntry defaults identity.kind to agent and keeps footerHost absent vs empty distinct", () => {
-  const absent = validateAccountEntry("example-org", { accountId: 2, targetType: "Organization", identity: { login: "a" } });
-  const empty = validateAccountEntry("example-org", { accountId: 2, targetType: "Organization", identity: { login: "a", footerHost: "" } });
+  const absent = validateAccountEntry("example-org", { accountId: 2, targetType: "organization", identity: { login: "a" } });
+  const empty = validateAccountEntry("example-org", { accountId: 2, targetType: "organization", identity: { login: "a", footerHost: "" } });
 
   assert.equal(absent.identity.kind, "agent");
   assert.equal("footerHost" in absent.identity, false);
@@ -425,7 +441,7 @@ test("validateAccountEntry defaults identity.kind to agent and keeps footerHost 
 });
 
 test("validateAccountEntry rejects bad identity fields", () => {
-  const entry = (identity) => ({ accountId: 2, targetType: "Organization", identity });
+  const entry = (identity) => ({ accountId: 2, targetType: "organization", identity });
 
   assert.throws(() => validateAccountEntry("o", entry({})), /identity field login must be a non-empty string/);
   assert.throws(() => validateAccountEntry("o", entry({ login: "a", kind: "robot" })), /identity kind must be agent or human/);
@@ -434,7 +450,7 @@ test("validateAccountEntry rejects bad identity fields", () => {
 });
 
 test("validateAccountEntry rejects an unknown or mismatched credential type, naming the account", () => {
-  const entry = (credential) => ({ accountId: 2, targetType: "Organization", credential });
+  const entry = (credential) => ({ accountId: 2, targetType: "organization", credential });
 
   assert.throws(() => validateAccountEntry("example-org", entry({ type: "ssh" })), /Account example-org credential type must be app or pat, got: ssh/);
   assert.throws(() => validateAccountEntry("example-org", entry({})), /credential type must be app or pat/);
@@ -454,7 +470,7 @@ test("validateAccountEntry rejects an unknown or mismatched credential type, nam
 
 test("validateAccountEntry names the move for a pre-v0.1 flat entry rather than reporting no blocks", () => {
   assert.throws(
-    () => validateAccountEntry("example-org", { type: "pat", accountId: 3, targetType: "Organization", tokenPath: "/x" }),
+    () => validateAccountEntry("example-org", { type: "pat", accountId: 3, targetType: "organization", tokenPath: "/x" }),
     /sets type, tokenPath directly on the entry; move them under a "credential" block/
   );
   assert.throws(
@@ -569,6 +585,27 @@ test("verifyPatAccount uses /rate_limit for liveness and cross-checks owner meta
     "https://example.test/rate_limit",
     "https://example.test/orgs/example-org-two"
   ]);
+});
+
+test("verifyPatAccount matches a lowercase user entry against GitHub's capitalised type", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-pat-"));
+  const tokenPath = path.join(tempDir, "token");
+  fs.writeFileSync(tokenPath, "github_pat_example", { mode: 0o600 });
+
+  const requestedUrls = [];
+  const fetchImpl = async (url) => {
+    requestedUrls.push(url);
+    return new Response(JSON.stringify({ id: 3, type: "User" }), { status: 200 });
+  };
+
+  const result = await verifyPatAccount(
+    "example-user-two",
+    patEntryAt(tokenPath, { targetType: "user" }),
+    { fetchImpl, apiUrl: "https://example.test" }
+  );
+
+  assert.deepEqual(result, { name: "example-user-two", ok: true });
+  assert.equal(requestedUrls.at(-1), "https://example.test/users/example-user-two");
 });
 
 test("verifyPatAccount reports a dead token as invalid rather than falling through", async () => {
@@ -713,7 +750,7 @@ test("resolveAccount with allowDefault: false refuses to fall back to defaultAcc
 test("validateConfig accepts an identity-only default account", () => {
   const identityOnlyDefault = {
     defaultAccount: "example-org-two",
-    accounts: { ...rawConfig.accounts, "example-org-two": { accountId: 3, targetType: "Organization", identity: exampleIdentity } }
+    accounts: { ...rawConfig.accounts, "example-org-two": { accountId: 3, targetType: "organization", identity: exampleIdentity } }
   };
 
   assert.equal(validateConfig(identityOnlyDefault).defaultAccount, "example-org-two");
@@ -726,7 +763,7 @@ test("mints with the App of the account's own credential block, not a shared one
     accounts: {
       "example-org": {
         accountId: 2,
-        targetType: "Organization",
+        targetType: "organization",
         credential: { type: "app", appId: 777, privateKeyPath: "/other/key.pem", installationId: 22 }
       }
     }
@@ -754,7 +791,7 @@ test("mints with the App of the account's own credential block, not a shared one
 test("validateConfig rejects one App configured with two different key paths", () => {
   const entry = (installationId, privateKeyPath) => ({
     accountId: installationId,
-    targetType: "Organization",
+    targetType: "organization",
     credential: { type: "app", appId: 100, privateKeyPath, installationId }
   });
 
@@ -773,12 +810,12 @@ test("verifyInstallations lists and classifies installations once per distinct A
     accounts: {
       "example-user": {
         accountId: 1,
-        targetType: "User",
+        targetType: "user",
         credential: { type: "app", appId: 100, privateKeyPath: "/keys/a.pem", installationId: 11 }
       },
       "example-org": {
         accountId: 2,
-        targetType: "Organization",
+        targetType: "organization",
         credential: { type: "app", appId: 200, privateKeyPath: "/keys/b.pem", installationId: 22 }
       }
     }
