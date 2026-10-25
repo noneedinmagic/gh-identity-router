@@ -20,10 +20,10 @@
 //   identity.sh --self-check     run built-in fixtures, print pass/fail.
 //
 // Exit codes: 0 ok, 1 declared identity does not match the derived credential,
-// 2 refused: the owner cannot be resolved or is not allow-listed, or the derived
-// credential is a human account not explicitly opted in. Under --footer, 2 is also
-// used when the owner has no identity block (credential only) and for kind: human —
-// the footer is refused, not the identity itself.
+// 2 refused: the owner cannot be resolved or is not allow-listed, the owner has no
+// identity block (credential only, so no signer is declared — --check refuses too), or
+// the derived credential is a human account not explicitly opted in. Under --footer, 2
+// is also used for kind: human — the footer is refused, not the identity itself.
 
 import os from "node:os";
 import { spawnSync } from "node:child_process";
@@ -142,8 +142,9 @@ export function deriveLogin({ ghBin = "gh" } = {}) {
 }
 
 // --- the security-relevant decision, isolated for testing -------------------
-// derivedRaw: the raw (unnormalized) derived login. declaredLogin: identity.login, ""
-// if the owner declares none. declaredKind: identity.kind, "" if none. credentialType:
+// derivedRaw: the raw (unnormalized) derived login. declaredLogin: identity.login ("" =
+// no declaration; resolve() never passes that, since an owner with no identity block is
+// refused before this point). declaredKind: identity.kind, "" if none. credentialType:
 // the entry's credential.type, "" if none. Returns 0/1/2 — the same values used as
 // bin/identity.sh's exit code.
 //
@@ -503,9 +504,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       process.stderr.write(printBlock(state));
     } else {
       process.stderr.write(
-        state.identity
-          ? "REFUSED: kind: human is declared — do not attach an agent footer to a human-authored PR (see this project's AGENTS.md \"## Identity\" section, or your own consuming project's equivalent).\n"
-          : `REFUSED: ${state.owner} has no identity block — a credential-only owner gets no footer.\n`
+        "REFUSED: kind: human is declared — do not attach an agent footer to a human-authored PR (see this project's AGENTS.md \"## Identity\" section, or your own consuming project's equivalent).\n"
       );
       state.status = 2;
     }

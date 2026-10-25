@@ -98,7 +98,8 @@ It resolves the owner like a token does but with the `defaultAccount` fallback d
   credential helper as "answer nothing"; every other non-zero code still fails closed.
 - Identity commands exit 0 (holds), 1 (declared login differs from the derived one) or 2
   (refused). Credential-only, absent, unresolvable, and invalid-config owners are all 2
-  with nothing on stdout.
+  with nothing on stdout, for `--check` as well as `--footer`: an owner with no `identity`
+  block has no declared signer to verify, so a pre-push gate refuses it too.
 - A derived login that is not a GitHub App is accepted only when `identity.login` names
   exactly that login and the entry vouches for it — `kind: human`, or a PAT credential for
   a machine user. No declaration can bless a login it does not name. The tool cannot tell

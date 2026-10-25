@@ -141,8 +141,11 @@ and renders the PR footer from the same block. The owner is resolved like a toke
 
 An owner that is absent from `accounts`, or cannot be resolved at all, gets no token and
 no footer. `identity.sh` exits 0 when the declaration holds, 1 on a login mismatch, and 2
-when it refuses (no identity applies, the owner has no `identity` block so no signer is
-declared, or the derived login is a person's account the declaration doesn't vouch for). Nothing is printed to stdout on a refusal.
+when it refuses: no identity applies, the owner has no `identity` block (so no signer is
+declared), or the derived login is a person's account the declaration doesn't vouch for.
+This holds for `--check` as well as `--footer`, so a pre-push hook that calls
+`identity.sh --check` blocks pushes to a credential-only owner until it declares an
+`identity`. Nothing is printed to stdout on a refusal.
 
 A login that is not a GitHub App (`name[bot]`) is accepted only when `identity.login`
 names exactly that login **and** either `kind` is `human` (the machine's owner acting
@@ -156,8 +159,8 @@ This is intentional: an identity-only owner means "use this machine's own `gh`
 credential", and `identity.login` only gates `identity.sh` and the footer — it does not
 stop `gh` from acting as whatever account is logged in. Add a `credential` block if you
 want the router to supply the token instead. The Git credential helper answers nothing,
-but `install.sh` clears the other github.com helpers, so HTTPS Git for an identity-only owner has no credential unless you configure
-another helper after this one.
+but `install.sh` clears the other github.com helpers, so HTTPS Git for an identity-only
+owner has no credential unless you configure another helper after this one.
 
 **The footer follows the owner it resolves, not the pull request's target.** In a fork
 clone (`origin` is your fork, the PR goes to another owner) or with
