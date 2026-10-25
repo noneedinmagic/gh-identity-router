@@ -81,7 +81,8 @@ Copy `config.example.json` to:
 ~/.config/gh-identity-router/config.json
 ```
 
-Each `accounts.<owner>` entry (keys are lowercase GitHub logins) has `accountId`,
+Each `accounts.<owner>` entry (keys must be lowercase GitHub logins — a mixed-case key is
+rejected with an error, not normalized) has `accountId`,
 `targetType` (`User` or `Organization`), an optional `host` (only `github.com` is
 supported; the field exists so GitHub Enterprise Server can be added later without a
 breaking change), and two independent, optional blocks — at least one is required:
@@ -98,7 +99,7 @@ breaking change), and two independent, optional blocks — at least one is requi
 resolved for a `gh` call. It never supplies an identity.
 
 To find the installation IDs for an App, run discovery against a small bootstrap config
-that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
+(a file you create by hand; nothing installs it) that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
 the flat pair is still read, since discovery runs before any account entry exists:
 
 ```bash
@@ -147,8 +148,11 @@ omits the host from the footer.
 
 When `multi-account-token` finds an identity-only owner it exits 3 with nothing on
 stdout. The `gh` wrapper then runs the real `gh` unchanged, so `gh` uses its own login.
-The Git credential helper answers nothing, but `install.sh` clears the other github.com
-helpers, so HTTPS Git for an identity-only owner has no credential unless you configure
+This is intentional: an identity-only owner means "use this machine's own `gh`
+credential", and `identity.login` only gates `identity.sh` and the footer — it does not
+stop `gh` from acting as whatever account is logged in. Add a `credential` block if you
+want the router to supply the token instead. The Git credential helper answers nothing,
+but `install.sh` clears the other github.com helpers, so HTTPS Git for an identity-only owner has no credential unless you configure
 another helper after this one.
 
 **The footer follows the owner it resolves, not the pull request's target.** In a fork
