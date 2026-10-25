@@ -223,3 +223,65 @@ test("kind: human is accepted by --check but never gets an agent footer", () => 
   assert.equal(footer.stdout, "");
   assert.match(footer.stderr, /kind: human is declared/);
 });
+
+// A selector that was supplied but cannot be parsed must refuse the footer, never fall
+// through to a later selector or to git config user.name — signing as the wrong owner is
+// worse than not signing. IDENTITY_ROUTER_ORG and user.name are set in every case below
+// to prove neither can rescue it.
+function unparseableFixture({ origin } = {}) {
+  const f = fixture(matrixAccounts);
+  const git = (...args) => spawnSync("git", args, { cwd: f.dir, env: { ...process.env, HOME: f.dir }, encoding: "utf8" });
+
+  git("config", "--global", "user.name", "Example Agent");
+
+  if (origin) {
+    git("init", "-q");
+    git("remote", "add", "origin", origin);
+  }
+
+  return { ...f, footer: (extraEnv) => f.footer(undefined, { IDENTITY_ROUTER_ORG: "both-org", ...extraEnv }) };
+}
+
+test("an unparseable GH_REPO refuses the footer, names GH_REPO, and --check agrees", () => {
+  const f = unparseableFixture();
+  const footer = f.footer({ GH_REPO: "acme" });
+  const check = spawnSync(process.execPath, [identityScript, "--check"], {
+    cwd: f.dir,
+    env: { ...process.env, HOME: f.dir, IDENTITY_ROUTER_CONFIG: path.join(f.dir, "config.json"), IDENTITY_ROUTER_ORG: "both-org", GH_REPO: "acme" },
+    encoding: "utf8"
+  });
+
+  assert.equal(footer.status, 2);
+  assert.equal(footer.stdout, "");
+  assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: acme/);
+  assert.equal(check.status, 2);
+  assert.match(check.stderr, /Could not parse a GitHub owner from GH_REPO: acme/);
+});
+
+test("GH_REPO unset and an unparseable origin refuses the footer and names the remote URL", () => {
+  const f = unparseableFixture({ origin: "https://gitlab.com/acme/repo" });
+  const footer = f.footer();
+
+  assert.equal(footer.status, 2);
+  assert.equal(footer.stdout, "");
+  assert.match(footer.stderr, /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/acme\/repo/);
+});
+
+test("credentials in an unparseable origin are redacted from the footer's error", () => {
+  const f = unparseableFixture({ origin: "https://user:s3cret@gitlab.com/acme/repo" });
+  const footer = f.footer();
+
+  assert.equal(footer.status, 2);
+  assert.equal(footer.stdout, "");
+  assert.match(footer.stderr, /remote URL: https:\/\/gitlab\.com\/acme\/repo/);
+  assert.doesNotMatch(footer.stderr, /s3cret/);
+});
+
+// Known gap: a scheme-less selector slips past redactCredentials, which only understands
+// URLs and `://` userinfo. Becomes a normal test when that is fixed.
+test("a scheme-less GH_REPO carrying credentials is not echoed in the footer's error", { todo: true }, () => {
+  const footer = unparseableFixture().footer({ GH_REPO: "x-access-token:s3cret@host/org/repo" });
+
+  assert.equal(footer.status, 2);
+  assert.doesNotMatch(footer.stderr, /s3cret/);
+});
