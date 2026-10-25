@@ -620,11 +620,17 @@ function uninstall({ backup }) {
   const home = process.env.HOME || fail("HOME is not set");
   const l = layout(home);
   const baselinePointer = path.join(l.state, "baseline-backup");
-  const dir = backup
-    ?? (exists(baselinePointer) ? fs.readFileSync(baselinePointer, "utf8").trim() : fail("No recorded setup to undo; pass --backup DIR"));
+  const release = lockSetup(l);
 
-  console.log(`Restored gh-identity-router state from: ${restoreBackup(l, dir)}`);
-  fs.rmSync(baselinePointer, { force: true });
+  try {
+    const dir = backup
+      ?? (exists(baselinePointer) ? fs.readFileSync(baselinePointer, "utf8").trim() : fail("No recorded setup to undo; pass --backup DIR"));
+
+    console.log(`Restored gh-identity-router state from: ${restoreBackup(l, dir)}`);
+    fs.rmSync(baselinePointer, { force: true });
+  } finally {
+    release();
+  }
 }
 
 export function main(argv = process.argv.slice(2)) {
