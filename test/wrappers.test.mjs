@@ -7,10 +7,27 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const toolDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const cli = path.join(toolDir, "bin", "gh-identity-router.mjs");
 
 function executable(file, contents) {
   fs.writeFileSync(file, contents, { mode: 0o755 });
 }
+
+const fixtureConfig = {
+  defaultAccount: "example-org",
+  accounts: {
+    "example-org": {
+      accountId: 1,
+      targetType: "Organization",
+      identity: {
+        login: "example-bot",
+        commitName: "example-bot[bot]",
+        commitEmail: "1+example-bot[bot]@users.noreply.github.com"
+      }
+    },
+    "plain-org": { accountId: 2, targetType: "Organization", identity: { login: "plain-bot" } }
+  }
+};
 
 function installerFixture(prefix = "multi-account-install-") {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -19,7 +36,9 @@ function installerFixture(prefix = "multi-account-install-") {
   const verifyCommand = path.join(home, "verify");
 
   fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(configPath, "{}\n", { mode: 0o600 });
+  // Live verification is faked below, but setup still reads the config for its
+  // commit-author includes, so the shape has to be valid.
+  fs.writeFileSync(configPath, JSON.stringify(fixtureConfig), { mode: 0o600 });
   executable(verifyCommand, "#!/usr/bin/env bash\nexit 0\n");
 
   return {
@@ -371,7 +390,7 @@ test("installer resets inherited credential helpers for github.com", () => {
   const fixture = installerFixture("multi-account-install-reset-");
 
   execFileSync("git", ["config", "--global", "credential.helper", "store"], { env: fixture.env });
-  execFileSync(path.join(toolDir, "install.sh"), [], { env: fixture.env });
+  execFileSync(cli, ["setup"], { env: fixture.env });
 
   assert.deepEqual(
     gitConfigValues(fixture.home, "credential.https://github.com.helper"),
@@ -382,7 +401,7 @@ test("installer resets inherited credential helpers for github.com", () => {
 
 test("restore accepts a pre-rename backup and puts the old paths back", () => {
   const fixture = installerFixture("multi-account-install-prerename-restore-");
-  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+  const output = execFileSync(cli, ["setup"], {
     encoding: "utf8",
     env: fixture.env
   });
@@ -399,7 +418,7 @@ test("restore accepts a pre-rename backup and puts the old paths back", () => {
   fs.writeFileSync(path.join(legacyBackup, "files", "share-identity"), "old identity module\n");
   fs.rmSync(path.join(legacyBackup, "files", "share-identity.absent"), { force: true });
 
-  execFileSync(path.join(toolDir, "install.sh"), ["--restore", legacyBackup], { env: fixture.env });
+  execFileSync(cli, ["uninstall", "--backup", legacyBackup], { env: fixture.env });
 
   assert.equal(
     fs.readFileSync(path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs"), "utf8"),
@@ -415,7 +434,7 @@ test("restore accepts a pre-rename backup and puts the old paths back", () => {
 test("installer installs mint-dispatch-token alongside the other wrappers", () => {
   const fixture = installerFixture("multi-account-install-mint-dispatch-");
 
-  execFileSync(path.join(toolDir, "install.sh"), [], { env: fixture.env });
+  execFileSync(cli, ["setup"], { env: fixture.env });
 
   const installedPath = path.join(fixture.home, ".local", "bin", "mint-dispatch-token");
   assert.equal(fs.existsSync(installedPath), true);
@@ -425,7 +444,7 @@ test("installer installs mint-dispatch-token alongside the other wrappers", () =
 test("installed identity.sh runs from the installed layout, not just a checkout", () => {
   const fixture = installerFixture("multi-account-install-identity-");
 
-  execFileSync(path.join(toolDir, "install.sh"), [], { env: fixture.env });
+  execFileSync(cli, ["setup"], { env: fixture.env });
 
   // Run the installed copy only: no checkout path is reachable from it.
   const installed = path.join(fixture.home, ".local", "bin", "identity.sh");
@@ -440,7 +459,7 @@ test("installed identity.sh runs from the installed layout, not just a checkout"
 
 test("restoring a backup from before identity was installed removes it and still succeeds", () => {
   const fixture = installerFixture("multi-account-install-legacy-restore-");
-  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+  const output = execFileSync(cli, ["setup"], {
     encoding: "utf8",
     env: fixture.env
   });
@@ -457,7 +476,7 @@ test("restoring a backup from before identity was installed removes it and still
     assert.equal(fs.existsSync(file), true);
   }
 
-  execFileSync(path.join(toolDir, "install.sh"), ["--restore", backupDir], { env: fixture.env });
+  execFileSync(cli, ["uninstall", "--backup", backupDir], { env: fixture.env });
 
   for (const file of installedIdentity) {
     assert.equal(fs.existsSync(file), false);
@@ -484,13 +503,13 @@ test("installer restores exact files and targeted Git config", () => {
     env: fixture.env
   });
 
-  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+  const output = execFileSync(cli, ["setup"], {
     encoding: "utf8",
     env: fixture.env
   });
   const backupDir = backupPathFrom(output);
 
-  execFileSync(path.join(toolDir, "install.sh"), ["--restore", backupDir], { env: fixture.env });
+  execFileSync(cli, ["uninstall", "--backup", backupDir], { env: fixture.env });
 
   assert.equal(fs.readFileSync(oldGh, "utf8"), "#!/usr/bin/env bash\necho old-gh\n");
   assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "multi-account-token")), false);
@@ -531,7 +550,7 @@ test("installer automatically restores state after post-install verification fai
     env: fixture.env
   });
 
-  const result = spawnSync(path.join(toolDir, "install.sh"), [], {
+  const result = spawnSync(cli, ["setup"], {
     encoding: "utf8",
     env: fixture.env
   });
@@ -552,7 +571,7 @@ test("missing config fails before any installer mutation", () => {
 
   fs.mkdirSync(path.dirname(oldGh), { recursive: true });
   executable(oldGh, "#!/usr/bin/env bash\necho old-gh\n");
-  const result = spawnSync(path.join(toolDir, "install.sh"), [], {
+  const result = spawnSync(cli, ["setup"], {
     encoding: "utf8",
     env: { ...process.env, HOME: home }
   });
@@ -565,7 +584,7 @@ test("missing config fails before any installer mutation", () => {
 
 test("restore validates the whole backup before changing live state", () => {
   const fixture = installerFixture("multi-account-install-corrupt-");
-  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+  const output = execFileSync(cli, ["setup"], {
     encoding: "utf8",
     env: fixture.env
   });
@@ -573,7 +592,7 @@ test("restore validates the whole backup before changing live state", () => {
   const installedGh = path.join(fixture.home, ".local", "bin", "gh");
 
   fs.unlinkSync(path.join(backupDir, "files", "share-example.absent"));
-  const result = spawnSync(path.join(toolDir, "install.sh"), ["--restore", backupDir], {
+  const result = spawnSync(cli, ["uninstall", "--backup", backupDir], {
     encoding: "utf8",
     env: fixture.env
   });
@@ -586,7 +605,7 @@ test("restore validates the whole backup before changing live state", () => {
 test("restore rejects a directory outside the managed backup root", () => {
   const fixture = installerFixture("multi-account-install-path-");
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-outside-"));
-  const result = spawnSync(path.join(toolDir, "install.sh"), ["--restore", outside], {
+  const result = spawnSync(cli, ["uninstall", "--backup", outside], {
     encoding: "utf8",
     env: fixture.env
   });
@@ -597,7 +616,7 @@ test("restore rejects a directory outside the managed backup root", () => {
 
 test("installer dry-run does not write to HOME", () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-install-dry-"));
-  const result = execFileSync(path.join(toolDir, "install.sh"), ["--dry-run"], {
+  const result = execFileSync(cli, ["setup", "--dry-run"], {
     encoding: "utf8",
     env: { ...process.env, HOME: tempHome }
   });
@@ -605,4 +624,182 @@ test("installer dry-run does not write to HOME", () => {
   assert.match(result, /Would require a successful live verification/);
   assert.match(result, /Would support rollback/);
   assert.deepEqual(fs.readdirSync(tempHome), []);
+});
+
+function runCli(args, env, extra = {}) {
+  return spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", env, ...extra });
+}
+
+function git(home, cwd, ...args) {
+  return spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, HOME: home } });
+}
+
+test("setup --verify passes only when the first gh on PATH is the installed wrapper", () => {
+  const fixture = installerFixture("multi-account-setup-verify-gh-");
+  const binDir = path.join(fixture.home, ".local", "bin");
+  const systemDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-system-gh-"));
+  const nodeDir = path.dirname(process.execPath);
+
+  executable(path.join(systemDir, "gh"), "#!/bin/sh\necho system-gh\n");
+  execFileSync(cli, ["setup"], { env: fixture.env });
+
+  const onPath = runCli(["setup", "--verify"], { ...fixture.env, PATH: [binDir, systemDir, nodeDir, "/usr/bin", "/bin"].join(path.delimiter) });
+  assert.equal(onPath.status, 0, onPath.stdout + onPath.stderr);
+  assert.match(onPath.stdout, /OK gh on PATH is the installed wrapper/);
+
+  const shadowed = runCli(["setup", "--verify"], { ...fixture.env, PATH: [systemDir, binDir, nodeDir, "/usr/bin", "/bin"].join(path.delimiter) });
+  assert.equal(shadowed.status, 1);
+  assert.match(shadowed.stdout, new RegExp(`ERROR gh on PATH.*resolves to ${systemDir}/gh`));
+
+  // Setup shells out to git, so keep git (alone) on this PATH; the host's own gh must not be.
+  const gitOnly = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-git-only-"));
+  fs.symlinkSync(spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim(), path.join(gitOnly, "git"));
+  const absent = runCli(["setup", "--verify"], { ...fixture.env, PATH: gitOnly });
+  assert.equal(absent.status, 1);
+  assert.match(absent.stdout, /ERROR gh on PATH.*add .*\.local\/bin to PATH/);
+});
+
+test("setup generates a commit-author includeIf fragment that Git actually applies", () => {
+  const fixture = installerFixture("multi-account-setup-include-");
+  const clone = (owner) => {
+    const dir = fs.mkdtempSync(path.join(fixture.home, `${owner}-`));
+
+    git(fixture.home, dir, "init", "-q");
+    git(fixture.home, dir, "remote", "add", "origin", `https://github.com/${owner}/repo`);
+    return dir;
+  };
+
+  // The home identity is already global; the include has to win over it, not just exist.
+  git(fixture.home, fixture.home, "config", "--global", "user.name", "home-agent");
+  git(fixture.home, fixture.home, "config", "--global", "user.email", "home@example.com");
+  execFileSync(cli, ["setup"], { env: fixture.env });
+
+  const author = (owner, key) => git(fixture.home, clone(owner), "config", key);
+  assert.equal(author("example-org", "user.name").stdout.trim(), "example-bot[bot]");
+  assert.equal(author("example-org", "user.email").stdout.trim(), "1+example-bot[bot]@users.noreply.github.com");
+  // An owner without commit fields gets no include and keeps the home identity.
+  assert.equal(author("plain-org", "user.name").stdout.trim(), "home-agent");
+});
+
+test("setup refuses a half-set commit author before changing anything", () => {
+  const fixture = installerFixture("multi-account-setup-half-author-");
+  const config = structuredClone(fixtureConfig);
+
+  delete config.accounts["example-org"].identity.commitEmail;
+  fs.writeFileSync(fixture.configPath, JSON.stringify(config));
+
+  const result = runCli(["setup"], fixture.env);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /example-org identity must set both commitName and commitEmail/);
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local")), false);
+});
+
+test("uninstall after two setups returns to the state before the first", () => {
+  const fixture = installerFixture("multi-account-uninstall-");
+  const oldGh = path.join(fixture.home, ".local", "bin", "gh");
+
+  fs.mkdirSync(path.dirname(oldGh), { recursive: true });
+  executable(oldGh, "#!/usr/bin/env bash\necho old-gh\n");
+  execFileSync("git", ["config", "--global", "credential.https://github.com.helper", "old-helper"], { env: fixture.env });
+
+  execFileSync(cli, ["setup"], { env: fixture.env });
+  execFileSync(cli, ["setup"], { env: fixture.env });
+  assert.deepEqual(gitConfigValues(fixture.home, "includeIf.hasconfig:remote.*.url:https://github.com/example-org/**.path").length, 1);
+
+  const result = runCli(["uninstall"], fixture.env);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(oldGh, "utf8"), "#!/usr/bin/env bash\necho old-gh\n");
+  assert.equal(fs.statSync(oldGh).mode & 0o111, 0o111);
+  assert.deepEqual(gitConfigValues(fixture.home, "credential.https://github.com.helper"), ["old-helper"]);
+  assert.deepEqual(gitConfigValues(fixture.home, "includeIf.hasconfig:remote.*.url:https://github.com/example-org/**.path"), []);
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "share", "gh-identity-router", "git")), false);
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "multi-account-token")), false);
+
+  // The baseline is spent; a second uninstall has nothing recorded to undo.
+  assert.match(runCli(["uninstall"], fixture.env).stderr, /No recorded setup to undo/);
+});
+
+test("the installed multi-account-token launcher works with no node on PATH", () => {
+  const fixture = installerFixture("multi-account-launcher-nopath-");
+  const emptyPath = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-empty-path-"));
+
+  execFileSync(cli, ["setup"], { env: fixture.env });
+
+  const launcher = path.join(fixture.home, ".local", "bin", "multi-account-token");
+  const text = fs.readFileSync(launcher, "utf8");
+  assert.ok(text.includes(`exec '${process.execPath}' `), text);
+  assert.doesNotMatch(text, /env node/);
+
+  const env = { ...fixture.env, PATH: emptyPath };
+  // Absolute /bin/sh so the shell itself starts; a null status (spawn failure) fails this.
+  assert.ok(spawnSync("/bin/sh", ["-c", "command -v node"], { env }).status > 0, "control: PATH really has no node");
+
+  // plain-org is identity-only: exit 3 and this message can only come from the script
+  // running under node.
+  const result = spawnSync(launcher, ["--repo", "plain-org/x"], { encoding: "utf8", env });
+  assert.equal(result.status, 3, result.stdout + result.stderr);
+  assert.match(result.stderr, /has no credential block/);
+});
+
+test("setup bakes a node path that needs shell quoting", () => {
+  const fixture = installerFixture("multi-account-launcher-quote-");
+  const dir = path.join(fixture.home, "it's a dir");
+  const link = path.join(dir, "node");
+
+  fs.mkdirSync(dir);
+  fs.symlinkSync(process.execPath, link);
+  execFileSync(cli, ["setup", "--node", link], { env: fixture.env });
+
+  const result = spawnSync(path.join(fixture.home, ".local", "bin", "multi-account-token"), ["--repo", "plain-org/x"], {
+    encoding: "utf8",
+    env: { ...fixture.env, PATH: "" }
+  });
+  assert.equal(result.status, 3, result.stderr);
+});
+
+test("setup fails clearly, before any change, when the node to bake is unusable", () => {
+  const fixture = installerFixture("multi-account-setup-bad-node-");
+  const oldNode = path.join(fixture.home, "node18");
+
+  executable(oldNode, "#!/bin/sh\necho 18.19.0\n");
+
+  for (const [node, expected] of [
+    [path.join(fixture.home, "missing", "node"), /Cannot run Node\.js at .*missing\/node.*--node/],
+    [oldNode, /requires Node\.js >=20, found 18\.19\.0 \(at .*node18\)/],
+    ["node", /Node path must be absolute, got: node/]
+  ]) {
+    const result = runCli(["setup", "--node", node], fixture.env);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, expected);
+    assert.doesNotMatch(result.stderr, /env: .*node/);
+    assert.equal(fs.existsSync(path.join(fixture.home, ".local")), false);
+  }
+});
+
+test("a failed re-setup rolls the commit-author includes back to the previous setup's", () => {
+  const fixture = installerFixture("multi-account-setup-include-rollback-");
+  const key = "includeIf.hasconfig:remote.*.url:https://github.com/example-org/**.path";
+  const fragment = path.join(fixture.home, ".local", "share", "gh-identity-router", "git", "example-org.gitconfig");
+
+  execFileSync(cli, ["setup"], { env: fixture.env });
+
+  // Config now has no commit author; the post-install verification (2nd call) fails.
+  const config = structuredClone(fixtureConfig);
+  delete config.accounts["example-org"].identity.commitName;
+  delete config.accounts["example-org"].identity.commitEmail;
+  fs.writeFileSync(fixture.configPath, JSON.stringify(config));
+  const counter = path.join(fixture.home, "verify-count");
+  executable(
+    fixture.verifyCommand,
+    `#!/bin/sh\nprintf x >>"${counter}"\n[ "$(wc -c <"${counter}")" -lt 2 ]\n`
+  );
+
+  const result = runCli(["setup"], fixture.env);
+
+  assert.equal(result.status, 1);
+  assert.deepEqual(gitConfigValues(fixture.home, key), [fragment]);
+  assert.match(fs.readFileSync(fragment, "utf8"), /example-bot\[bot\]/);
 });

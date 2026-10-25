@@ -13,7 +13,7 @@
 > update the absolute `privateKeyPath` and any PAT `tokenPath` values in its
 > `config.json` (they still point under `~/.config/gh-multi-account`), e.g.
 > `sed -i 's#/gh-multi-account/#/gh-identity-router/#g' ~/.config/gh-identity-router/config.json`.
-> Then re-run `./install.sh`; remove the stale `~/.local/bin/multi-account-git-credential`
+> Then re-run `gh-identity-router setup`; remove the stale `~/.local/bin/multi-account-git-credential`
 > by hand.
 >
 > The account entry schema also changed: App/PAT settings now live in a per-entry
@@ -159,7 +159,7 @@ This is intentional: an identity-only owner means "use this machine's own `gh`
 credential", and `identity.login` only gates `identity.sh` and the footer — it does not
 stop `gh` from acting as whatever account is logged in. Add a `credential` block if you
 want the router to supply the token instead. The Git credential helper answers nothing,
-but `install.sh` clears the other github.com helpers, so HTTPS Git for an identity-only
+but `setup` clears the other github.com helpers, so HTTPS Git for an identity-only
 owner has no credential unless you configure another helper after this one.
 
 **The footer follows the owner it resolves, not the pull request's target.** In a fork
@@ -219,7 +219,7 @@ as `contractor-org` does in `config.example.json`.
 
 ```bash
 npm test
-./install.sh --dry-run
+node bin/gh-identity-router.mjs setup --dry-run
 ```
 
 Review the dry-run and run a live verification from the source tree before
@@ -227,19 +227,39 @@ installing:
 
 ```bash
 ./src/multi-account-token.mjs --verify
-./install.sh
+node bin/gh-identity-router.mjs setup
 ```
 
-The installer repeats live verification before any mutation, backs up replaced files
-and the exact targeted Git credential settings, installs the helpers, and verifies
-again. A post-mutation failure triggers automatic restoration. Backups live under
-`~/.local/state/gh-identity-router/backups/<timestamp>-<pid>/`. The installer never
-creates, overwrites, or backs up the live config or private key.
+(`bin/gh-identity-router.mjs` is the package's `gh-identity-router` executable.) `setup`
+checks that the Node.js it is running under works and is `>=20`, repeats live
+verification before any mutation, backs up replaced files and the exact targeted Git
+credential settings, installs the helpers, and verifies again. A post-mutation failure
+triggers automatic restoration. Backups live under
+`~/.local/state/gh-identity-router/backups/<timestamp>-<pid>/`. Setup never creates,
+overwrites, or backs up the live config or private key.
+
+The installed `multi-account-token` is a small launcher with the absolute path of that
+Node.js baked in at setup time, so a later shell with no `node` on `PATH` (or a version
+manager that has not activated one) still works. Pass `--node /abs/path/to/node` to
+bake a different Node.js. Re-run `setup` after moving or removing the one it baked.
+
+Check an existing install at any time, without changing anything:
+
+```bash
+gh-identity-router setup --verify
+```
+
+It confirms the installed files, the baked Node.js, the Git credential settings, the
+commit-author includes (below), and live credentials, and that `command -v gh` resolves
+to the installed wrapper (`~/.local/bin/gh`) rather than a `gh` earlier on `PATH`.
+Plain `setup` only warns about that last one, since `~/.local/bin` is often not on
+`PATH` yet at first install.
 
 It also installs `identity.sh` into `~/.local/bin` and its Node implementation,
 `identity.mjs`, into `~/.local/share/gh-identity-router/`, so `identity.sh --footer`
 works without a checkout. A backup taken by an earlier installer has no record of those
-two files; restoring it treats them as absent and removes them.
+two files; restoring it treats them as absent and removes them. (`identity.sh` itself
+still runs whichever `node` is first on `PATH`.)
 
 It installs the credential helper as `~/.local/bin/git-credential-gh-identity-router`
 and registers it by absolute path, so Git finds it without `~/.local/bin` on `PATH`. It
@@ -289,25 +309,23 @@ who a commit says it's from. With one global `user.name`/`user.email`, every com
 on the machine is authored and committed as that identity, in every org's repo,
 whichever App or PAT later pushes it. An org that must not see this home's identity
 (a separate bot for an external org) needs its own author, routed by remote URL with
-Git's native `includeIf` (Git 2.36+):
+Git's native `includeIf` (Git 2.36+).
+
+`gh-identity-router setup` generates this for every account whose `identity` sets
+`commitName` and `commitEmail` (both or neither; setup refuses half an author). For each
+owner it writes `~/.local/share/gh-identity-router/git/<owner>.gitconfig` (a `[user]`
+section only) and adds this to `~/.gitconfig`, after your existing `[user]` section:
 
 ```ini
-# ~/.gitconfig
-[user]
-    name = <home-identity>
-    email = <home-identity-email>
-
-# Must come after the [user] section above: git parses the file top-to-bottom and the
-# last value for a key wins, so an includeIf placed before [user] gets its org-specific
-# name/email silently overwritten by the block below it.
-[includeIf "hasconfig:remote.*.url:https://github.com/<org>/**"]
-    path = ~/.config/git/<org>.gitconfig
-
-# ~/.config/git/<org>.gitconfig — [user] only
-[user]
-    name = <org-bot>[bot]
-    email = <id>+<org-bot>[bot]@users.noreply.github.com
+[includeIf "hasconfig:remote.*.url:https://github.com/<owner>/**"]
+    path = ~/.local/share/gh-identity-router/git/<owner>.gitconfig
 ```
+
+Re-running `setup` rewrites its own entries; `uninstall` removes them. Includes that
+point anywhere else are never touched. To do it by hand instead, put the same two
+pieces in place yourself, keeping the `includeIf` below the global `[user]` section:
+git parses the file top-to-bottom and the last value for a key wins, so an include
+placed before `[user]` gets its org-specific name/email silently overwritten.
 
 Verify from inside a clone: `git config --show-origin --get user.name` must name the
 per-org file. Worktrees of that clone inherit it.
@@ -397,18 +415,25 @@ account and describe the inventory as incomplete. Do not fall back to
 
 ## Rollback
 
-The successful installer prints the exact restore command:
-
 ```bash
-./install.sh --restore ~/.local/state/gh-identity-router/backups/TIMESTAMP-PID
+gh-identity-router uninstall
 ```
+
+restores the state from before the **first** `setup` (so running `setup` twice and then
+`uninstall` still undoes everything): the prior files at every installed path, the exact
+prior values (including absent and empty Git settings) for
+`credential.https://github.com.{helper,username,useHttpPath}`, and the prior commit-author
+includes. It removes the generated fragments. (If you installed with the old `install.sh`,
+the first `setup` records *that* install as its baseline; to get back to the state before
+it, run `uninstall --backup` with your oldest backup under
+`~/.local/state/gh-identity-router/backups/`.) `uninstall --backup DIR` restores a specific
+backup instead (for example the one `setup` printed).
 
 Restore accepts only a valid manifest below the current home's managed backup root.
 Backups taken before the rename (under `~/.local/state/gh-multi-account/backups`) are
-also accepted and restore the old helper and share-directory paths.
-It restores the exact prior files and values (including absent and empty Git
-settings) for `credential.https://github.com.{helper,username,useHttpPath}`. It does
-not change the live config or private key.
+also accepted and restore the old helper and share-directory paths. It does not change
+the live config or private key. npm has no uninstall hook, so removing the package does
+not undo `setup`; run `uninstall` first.
 
 ## Contributing
 

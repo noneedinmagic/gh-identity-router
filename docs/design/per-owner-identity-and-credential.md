@@ -2,8 +2,8 @@
 
 **Status: implemented for v0.1 in `src/multi-account-token.mjs` (validation, per-entry
 minting and verification) and `src/identity.mjs` (identity and footer from the same
-config). The `setup` subcommand that generates commit-author routing from
-`identity.commitName`/`commitEmail` is still to come.**
+config). `gh-identity-router setup` (`src/setup.mjs`) generates the per-owner
+commit-author routing from `identity.commitName`/`commitEmail`.**
 
 ## Motivation
 
@@ -115,8 +115,8 @@ memory, global instructions, or prompt history runs — that's a machine-level c
 separate OS user), documented as a recommendation in the README's "Identity isolation"
 section, not encoded in this schema. Config routing alone cannot close that leak path.
 
-It does not build a doctor/wizard that would verify an entry's `identity` block
-against the actual `includeIf` commit-author routing on disk — that's deferred to
-post-v0.1 work. `identity.commitName`/`commitEmail` exist in the schema so the `setup`
-command can *generate* the routing fragment; verifying pre-existing clones against it
-is a separate, later feature.
+It does not build a doctor/wizard that would verify existing clones against the
+`includeIf` commit-author routing — that's deferred to post-v0.1 work. `setup` only
+*generates* the routing fragment from `identity.commitName`/`commitEmail` (and
+`setup --verify` checks the fragment it wrote is still in place); checking each clone's
+remotes is a separate, later feature.

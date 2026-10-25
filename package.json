@@ -4,6 +4,9 @@
   "private": true,
   "description": "Multi-account GitHub App/PAT credential routing by target repository owner, shared by any coding-agent identity that needs to act as a different login per organization",
   "type": "module",
+  "bin": {
+    "gh-identity-router": "bin/gh-identity-router.mjs"
+  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
