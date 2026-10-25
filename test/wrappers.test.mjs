@@ -14,7 +14,7 @@ function executable(file, contents) {
 
 function installerFixture(prefix = "multi-account-install-") {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const configDir = path.join(home, ".config", "gh-multi-account");
+  const configDir = path.join(home, ".config", "gh-identity-router");
   const configPath = path.join(configDir, "config.json");
   const verifyCommand = path.join(home, "verify");
 
@@ -29,8 +29,8 @@ function installerFixture(prefix = "multi-account-install-") {
     env: {
       ...process.env,
       HOME: home,
-      MULTI_ACCOUNT_CONFIG: configPath,
-      MULTI_ACCOUNT_VERIFY_COMMAND: verifyCommand
+      IDENTITY_ROUTER_CONFIG: configPath,
+      IDENTITY_ROUTER_VERIFY_COMMAND: verifyCommand
     }
   };
 }
@@ -79,8 +79,8 @@ test("gh wrapper selects --repo over the current repository remote", () => {
     cwd: tempDir,
     env: {
       ...process.env,
-      MULTI_ACCOUNT_REAL_GH: ghCommand,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand
+      IDENTITY_ROUTER_REAL_GH: ghCommand,
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand
     }
   });
 
@@ -102,8 +102,8 @@ test("gh wrapper selects GH_REPO when --repo is absent", () => {
     cwd: tempDir,
     env: {
       ...process.env,
-      MULTI_ACCOUNT_REAL_GH: ghCommand,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand,
+      IDENTITY_ROUTER_REAL_GH: ghCommand,
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand,
       GH_REPO: "example-org/repo"
     }
   });
@@ -126,8 +126,8 @@ test("gh wrapper prefers --repo over GH_REPO", () => {
     cwd: tempDir,
     env: {
       ...process.env,
-      MULTI_ACCOUNT_REAL_GH: ghCommand,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand,
+      IDENTITY_ROUTER_REAL_GH: ghCommand,
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand,
       GH_REPO: "example-org/repo"
     }
   });
@@ -150,8 +150,8 @@ test("gh wrapper selects the current origin when --repo is absent", () => {
     cwd: tempDir,
     env: {
       ...process.env,
-      MULTI_ACCOUNT_REAL_GH: ghCommand,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand
+      IDENTITY_ROUTER_REAL_GH: ghCommand,
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand
     }
   });
 
@@ -176,7 +176,7 @@ function realTokenCommandConfig(prefix) {
 
   return {
     tokenCommand: path.resolve(toolDir, "src", "multi-account-token.mjs"),
-    env: { ...process.env, MULTI_ACCOUNT_CONFIG: configPath }
+    env: { ...process.env, IDENTITY_ROUTER_CONFIG: configPath }
   };
 }
 
@@ -187,7 +187,7 @@ test("gh wrapper fails closed on a --repo value that cannot be parsed", () => {
 
   const result = spawnSync(path.join(toolDir, "bin", "gh"), ["pr", "list", "--repo", "not-a-full-repo"], {
     encoding: "utf8",
-    env: { ...env, MULTI_ACCOUNT_REAL_GH: ghCommand, MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand }
+    env: { ...env, IDENTITY_ROUTER_REAL_GH: ghCommand, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
   });
 
   assert.notEqual(result.status, 0);
@@ -197,10 +197,10 @@ test("gh wrapper fails closed on a --repo value that cannot be parsed", () => {
 test("Git credential helper fails closed on an unparseable credential path", () => {
   const { tokenCommand, env } = realTokenCommandConfig("multi-account-cred-unparseable-");
 
-  const result = spawnSync(path.join(toolDir, "bin", "multi-account-git-credential"), ["get"], {
+  const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
     input: "protocol=https\nhost=github.com\npath=not-a-full-repo\n\n",
     encoding: "utf8",
-    env: { ...env, MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand }
+    env: { ...env, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
   });
 
   assert.notEqual(result.status, 0);
@@ -214,12 +214,12 @@ test("Git credential helper uses the owner from the credential path", () => {
   const tokenCommand = path.join(tempDir, "token");
 
   executable(tokenCommand, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >"${logPath}"\nprintf selected-token\n`);
-  const result = spawnSync(path.join(toolDir, "bin", "multi-account-git-credential"), ["get"], {
+  const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
     input: "protocol=https\nhost=github.com\npath=example-org/repo.git\n\n",
     encoding: "utf8",
     env: {
       ...process.env,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand
     }
   });
 
@@ -233,12 +233,12 @@ test("Git credential helper exits non-zero with empty stdout when token minting 
   const tokenCommand = path.join(tempDir, "token");
 
   executable(tokenCommand, "#!/usr/bin/env bash\necho 'mint failed' >&2\nexit 1\n");
-  const result = spawnSync(path.join(toolDir, "bin", "multi-account-git-credential"), ["get"], {
+  const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
     input: "protocol=https\nhost=github.com\npath=example-org/repo.git\n\n",
     encoding: "utf8",
     env: {
       ...process.env,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand
     }
   });
 
@@ -257,7 +257,7 @@ test("mint-dispatch-token requests a repo-scoped, minimal-permission token", () 
     encoding: "utf8",
     env: {
       ...process.env,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand
     }
   });
 
@@ -307,7 +307,7 @@ test("mint-dispatch-token fails rather than emitting an empty token", () => {
     encoding: "utf8",
     env: {
       ...process.env,
-      MULTI_ACCOUNT_TOKEN_COMMAND: tokenCommand
+      IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand
     }
   });
 
@@ -324,9 +324,41 @@ test("installer resets inherited credential helpers for github.com", () => {
 
   assert.deepEqual(
     gitConfigValues(fixture.home, "credential.https://github.com.helper"),
-    ["", `${fixture.home}/.local/bin/multi-account-git-credential`]
+    ["", path.join(fixture.home, ".local", "bin", "git-credential-gh-identity-router")]
   );
   assert.deepEqual(gitConfigValues(fixture.home, "credential.helper"), ["store"]);
+});
+
+test("restore accepts a pre-rename backup and puts the old paths back", () => {
+  const fixture = installerFixture("multi-account-install-prerename-restore-");
+  const output = execFileSync(path.join(toolDir, "install.sh"), [], {
+    encoding: "utf8",
+    env: fixture.env
+  });
+  const backupDir = backupPathFrom(output);
+  const stateRoot = path.join(fixture.home, ".local", "state");
+  const legacyBackup = path.join(stateRoot, "gh-multi-account", "backups", path.basename(backupDir));
+
+  // Rebuild the backup as the pre-rename installer would have written it.
+  fs.mkdirSync(path.dirname(legacyBackup), { recursive: true });
+  fs.renameSync(backupDir, legacyBackup);
+  fs.writeFileSync(path.join(legacyBackup, "manifest.version"), "gh-multi-account-backup-v1\n");
+  fs.writeFileSync(path.join(legacyBackup, "files", "bin-credential"), "old helper\n");
+  fs.unlinkSync(path.join(legacyBackup, "files", "bin-credential.absent"));
+  fs.writeFileSync(path.join(legacyBackup, "files", "share-identity"), "old identity module\n");
+  fs.rmSync(path.join(legacyBackup, "files", "share-identity.absent"), { force: true });
+
+  execFileSync(path.join(toolDir, "install.sh"), ["--restore", legacyBackup], { env: fixture.env });
+
+  assert.equal(
+    fs.readFileSync(path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs"), "utf8"),
+    "old identity module\n"
+  );
+
+  assert.equal(
+    fs.readFileSync(path.join(fixture.home, ".local", "bin", "multi-account-git-credential"), "utf8"),
+    "old helper\n"
+  );
 });
 
 test("installer installs mint-dispatch-token alongside the other wrappers", () => {
@@ -350,7 +382,7 @@ test("installed identity.sh runs from the installed layout, not just a checkout"
 
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(
-    fs.existsSync(path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs")),
+    fs.existsSync(path.join(fixture.home, ".local", "share", "gh-identity-router", "identity.mjs")),
     true
   );
 });
@@ -364,7 +396,7 @@ test("restoring a backup from before identity was installed removes it and still
   const backupDir = backupPathFrom(output);
   const installedIdentity = [
     path.join(fixture.home, ".local", "bin", "identity.sh"),
-    path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs")
+    path.join(fixture.home, ".local", "share", "gh-identity-router", "identity.mjs")
   ];
 
   // Simulate the previous installer's backup: no file state for the identity targets.
@@ -477,7 +509,7 @@ test("missing config fails before any installer mutation", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Config file does not exist/);
   assert.equal(fs.readFileSync(oldGh, "utf8"), "#!/usr/bin/env bash\necho old-gh\n");
-  assert.equal(fs.existsSync(path.join(home, ".local", "state", "gh-multi-account")), false);
+  assert.equal(fs.existsSync(path.join(home, ".local", "state", "gh-identity-router")), false);
 });
 
 test("restore validates the whole backup before changing live state", () => {

@@ -4,7 +4,7 @@
 # file only resolves the Node script's path and delegates argv/exit code to it.
 #
 # Two layouts: a checkout (bin/identity.sh + src/identity.mjs) and the installed one
-# (~/.local/bin/identity.sh + ~/.local/share/gh-multi-account/identity.mjs, which sits
+# (~/.local/bin/identity.sh + ~/.local/share/gh-identity-router/identity.mjs, which sits
 # beside multi-account-token.mjs so its relative import resolves).
 #
 # Usage, exit codes: see src/identity.mjs's own header comment — unchanged from before
@@ -22,5 +22,5 @@ while [ -L "$self" ]; do
 done
 script_dir=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd)
 script=$script_dir/../src/identity.mjs
-[ -f "$script" ] || script=$script_dir/../share/gh-multi-account/identity.mjs
+[ -f "$script" ] || script=$script_dir/../share/gh-identity-router/identity.mjs
 exec node "$script" "$@"
