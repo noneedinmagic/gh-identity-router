@@ -27,20 +27,20 @@ import {
   verifyPatAccount
 } from "../src/multi-account-token.mjs";
 
+const appCredential = { type: "app", appId: 123, privateKeyPath: "/private/key.pem" };
+
 const rawConfig = {
-  appId: 123,
-  privateKeyPath: "/private/key.pem",
   defaultAccount: "example-user",
   accounts: {
     "example-user": {
       accountId: 1,
-      installationId: 11,
-      targetType: "User"
+      targetType: "User",
+      credential: { ...appCredential, installationId: 11 }
     },
     "example-org": {
       accountId: 2,
-      installationId: 22,
-      targetType: "Organization"
+      targetType: "Organization",
+      credential: { ...appCredential, installationId: 22 }
     }
   }
 };
@@ -164,7 +164,6 @@ test("validates installation metadata before minting a token", async () => {
   };
 
   const token = await mintInstallationToken({
-    config,
     account: resolveAccount(config, { account: "example-org" }),
     privateKey,
     fetchImpl,
@@ -199,7 +198,6 @@ test("mints an unscoped token by default, with no request body", async () => {
   };
 
   await mintInstallationToken({
-    config,
     account: resolveAccount(config, { account: "example-org" }),
     privateKey,
     fetchImpl,
@@ -231,7 +229,6 @@ test("mints a token scoped to repositories and permissions when requested", asyn
   };
 
   await mintInstallationToken({
-    config,
     account: resolveAccount(config, { account: "example-org" }),
     privateKey,
     fetchImpl,
@@ -292,7 +289,6 @@ test("surfaces a GitHub API timeout through fail() with the URL named", async ()
 
   await assert.rejects(
     mintInstallationToken({
-      config,
       account: resolveAccount(config, { account: "example-org" }),
       privateKey,
       fetchImpl,
@@ -381,49 +377,104 @@ test("lists all app installations for config discovery", async () => {
 });
 
 const patAccountEntry = {
-  type: "pat",
   accountId: 3,
   targetType: "Organization",
-  tokenPath: "/private/example-org-two.token"
+  credential: { type: "pat", tokenPath: "/private/example-org-two.token" }
 };
 
-test("validateAccountEntry defaults absent type to app and accepts a PAT entry", () => {
-  assert.deepEqual(validateAccountEntry("example-org", rawConfig.accounts["example-org"]), {
-    type: "app",
+function patEntryAt(tokenPath, extra = {}) {
+  return { ...patAccountEntry, credential: { type: "pat", tokenPath }, ...extra };
+}
+
+const exampleIdentity = { login: "example-agent", displayName: "Example Agent", kind: "agent" };
+
+test("validateAccountEntry accepts a credential only, an identity only, or both", () => {
+  const credentialOnly = validateAccountEntry("example-org", rawConfig.accounts["example-org"]);
+  assert.deepEqual(credentialOnly, {
     accountId: 2,
-    installationId: 22,
-    targetType: "Organization"
+    targetType: "Organization",
+    host: "github.com",
+    credential: { type: "app", appId: "123", privateKeyPath: "/private/key.pem", installationId: 22 }
   });
-  assert.deepEqual(validateAccountEntry("example-org-two", patAccountEntry), patAccountEntry);
+
+  const identityOnly = validateAccountEntry("example-org", { accountId: 2, targetType: "Organization", identity: exampleIdentity });
+  assert.equal(identityOnly.credential, undefined);
+  assert.deepEqual(identityOnly.identity, exampleIdentity);
+
+  const both = validateAccountEntry("example-org", { ...rawConfig.accounts["example-org"], identity: exampleIdentity });
+  assert.equal(both.credential.installationId, 22);
+  assert.equal(both.identity.login, "example-agent");
+
+  assert.deepEqual(validateAccountEntry("example-org-two", patAccountEntry).credential, patAccountEntry.credential);
 });
 
-test("validateAccountEntry rejects an unknown type, naming the account", () => {
+test("validateAccountEntry rejects an entry with neither block", () => {
   assert.throws(
-    () => validateAccountEntry("example-org", { ...rawConfig.accounts["example-org"], type: "ssh" }),
-    /Account example-org has unknown type: ssh/
+    () => validateAccountEntry("example-org", { accountId: 2, targetType: "Organization" }),
+    /Account example-org needs a credential block, an identity block, or both/
   );
 });
 
-test("validateAccountEntry rejects an entry carrying the other type's fields", () => {
+test("validateAccountEntry defaults identity.kind to agent and keeps footerHost absent vs empty distinct", () => {
+  const absent = validateAccountEntry("example-org", { accountId: 2, targetType: "Organization", identity: { login: "a" } });
+  const empty = validateAccountEntry("example-org", { accountId: 2, targetType: "Organization", identity: { login: "a", footerHost: "" } });
+
+  assert.equal(absent.identity.kind, "agent");
+  assert.equal("footerHost" in absent.identity, false);
+  assert.equal(empty.identity.footerHost, "");
+});
+
+test("validateAccountEntry rejects bad identity fields", () => {
+  const entry = (identity) => ({ accountId: 2, targetType: "Organization", identity });
+
+  assert.throws(() => validateAccountEntry("o", entry({})), /identity field login must be a non-empty string/);
+  assert.throws(() => validateAccountEntry("o", entry({ login: "a", kind: "robot" })), /identity kind must be agent or human/);
+  assert.throws(() => validateAccountEntry("o", entry({ login: "a", footerhost: "x" })), /identity has unknown field: footerhost/);
+  assert.throws(() => validateAccountEntry("o", entry({ login: "a", commitEmail: 5 })), /field commitEmail must be a string/);
+});
+
+test("validateAccountEntry rejects an unknown or mismatched credential type, naming the account", () => {
+  const entry = (credential) => ({ accountId: 2, targetType: "Organization", credential });
+
+  assert.throws(() => validateAccountEntry("example-org", entry({ type: "ssh" })), /Account example-org credential type must be app or pat, got: ssh/);
+  assert.throws(() => validateAccountEntry("example-org", entry({})), /credential type must be app or pat/);
   assert.throws(
-    () => validateAccountEntry("example-org", { ...rawConfig.accounts["example-org"], tokenPath: "/x" }),
-    /Account example-org is app-typed and must not set tokenPath/
+    () => validateAccountEntry("example-org", entry({ ...rawConfig.accounts["example-org"].credential, tokenPath: "/x" })),
+    /credential \(type app\) has unknown field: tokenPath/
   );
   assert.throws(
-    () => validateAccountEntry("example-org-two", { ...patAccountEntry, installationId: 99 }),
-    /Account example-org-two is pat-typed and must not set installationId/
+    () => validateAccountEntry("example-org-two", entry({ ...patAccountEntry.credential, installationId: 99 })),
+    /credential \(type pat\) has unknown field: installationId/
+  );
+  assert.throws(
+    () => validateAccountEntry("example-org", entry({ type: "app", appId: 1, privateKeyPath: "/k" })),
+    /credential field installationId must be a positive numeric ID/
   );
 });
 
-test("validateConfig accepts a config with no App-typed account and no appId/privateKeyPath", () => {
+test("validateAccountEntry names the move for a pre-v0.1 flat entry rather than reporting no blocks", () => {
+  assert.throws(
+    () => validateAccountEntry("example-org", { type: "pat", accountId: 3, targetType: "Organization", tokenPath: "/x" }),
+    /sets type, tokenPath directly on the entry; move them under a "credential" block/
+  );
+  assert.throws(
+    () => validateConfig({ ...rawConfig, appId: 123, privateKeyPath: "/k" }),
+    /top level; move them under each App account's credential block/
+  );
+});
+
+test("validateAccountEntry accepts host github.com and rejects any other host", () => {
+  assert.equal(validateAccountEntry("o", { ...patAccountEntry, host: "github.com" }).host, "github.com");
+  assert.throws(() => validateAccountEntry("o", { ...patAccountEntry, host: "ghe.example.test" }), /host must be github\.com/);
+});
+
+test("validateConfig accepts a config with no App-typed account", () => {
   const purePatConfig = validateConfig({
     defaultAccount: "example-org-two",
     accounts: { "example-org-two": patAccountEntry }
   });
 
-  assert.equal(purePatConfig.appId, undefined);
-  assert.equal(purePatConfig.privateKeyPath, undefined);
-  assert.equal(purePatConfig.accounts["example-org-two"].type, "pat");
+  assert.equal(purePatConfig.accounts["example-org-two"].credential.type, "pat");
 });
 
 test("validateConfig rejects a PAT-typed defaultAccount when an App-typed account exists", () => {
@@ -444,8 +495,7 @@ test("validateConfig accepts a mixed config with an App-typed defaultAccount", (
   });
 
   assert.equal(mixedConfig.defaultAccount, "example-user");
-  assert.equal(mixedConfig.accounts["example-org-two"].type, "pat");
-  assert.equal(mixedConfig.appId, "123");
+  assert.equal(mixedConfig.accounts["example-org-two"].credential.type, "pat");
 });
 
 test("resolveAccount carries the type through for a PAT-typed account", () => {
@@ -454,7 +504,7 @@ test("resolveAccount carries the type through for a PAT-typed account", () => {
     accounts: { ...rawConfig.accounts, "example-org-two": patAccountEntry }
   });
 
-  assert.equal(resolveAccount(mixedConfig, { account: "example-org-two" }).type, "pat");
+  assert.equal(resolveAccount(mixedConfig, { account: "example-org-two" }).credential.type, "pat");
 });
 
 test("readPatToken reads and trims the token file, refusing a group-readable file", () => {
@@ -510,7 +560,7 @@ test("verifyPatAccount uses /rate_limit for liveness and cross-checks owner meta
 
   const result = await verifyPatAccount(
     "example-org-two",
-    { ...patAccountEntry, tokenPath },
+    patEntryAt(tokenPath),
     { fetchImpl, apiUrl: "https://example.test" }
   );
 
@@ -530,7 +580,7 @@ test("verifyPatAccount reports a dead token as invalid rather than falling throu
 
   const result = await verifyPatAccount(
     "example-org-two",
-    { ...patAccountEntry, tokenPath },
+    patEntryAt(tokenPath),
     { fetchImpl, apiUrl: "https://example.test" }
   );
 
@@ -551,7 +601,7 @@ test("verifyPatAccount reports an owner metadata mismatch", async () => {
 
   const result = await verifyPatAccount(
     "example-org-two",
-    { ...patAccountEntry, tokenPath },
+    patEntryAt(tokenPath),
     { fetchImpl, apiUrl: "https://example.test" }
   );
 
@@ -569,7 +619,7 @@ test("verifyInstallations combines App classification and PAT checks without cra
 
   const purePatConfig = validateConfig({
     defaultAccount: "example-org-two",
-    accounts: { "example-org-two": { ...patAccountEntry, tokenPath } }
+    accounts: { "example-org-two": patEntryAt(tokenPath) }
   });
 
   const fetchImpl = async (url) => {
@@ -601,7 +651,7 @@ test("--discover-installations fails cleanly on a config with no App", () => {
   fs.writeFileSync(tokenPath, "github_pat_example", { mode: 0o600 });
   fs.writeFileSync(configPath, JSON.stringify({
     defaultAccount: "example-org-two",
-    accounts: { "example-org-two": { ...patAccountEntry, tokenPath } }
+    accounts: { "example-org-two": patEntryAt(tokenPath) }
   }), { mode: 0o600 });
 
   const result = spawnSync(process.execPath, [scriptPath, "--discover-installations"], {
@@ -626,7 +676,7 @@ test("--repositories/--permissions on a PAT-typed account fails rather than mint
   fs.writeFileSync(tokenPath, "github_pat_example", { mode: 0o600 });
   fs.writeFileSync(configPath, JSON.stringify({
     defaultAccount: "example-org-two",
-    accounts: { "example-org-two": { ...patAccountEntry, tokenPath } }
+    accounts: { "example-org-two": patEntryAt(tokenPath) }
   }), { mode: 0o600 });
 
   const result = spawnSync(
@@ -650,4 +700,139 @@ test("checkNodeVersion rejects unsupported major versions with a clear message",
 
   assert.match(message, /requires Node\.js >=20/);
   assert.match(message, /18\.19\.0/);
+});
+
+test("resolveAccount with allowDefault: false refuses to fall back to defaultAccount", () => {
+  assert.throws(
+    () => resolveAccount(config, {}, { allowDefault: false }),
+    /No GitHub owner could be resolved/
+  );
+  assert.equal(resolveAccount(config, { repository: "example-org/repo" }, { allowDefault: false }).name, "example-org");
+});
+
+test("validateConfig accepts an identity-only default account", () => {
+  const identityOnlyDefault = {
+    defaultAccount: "example-org-two",
+    accounts: { ...rawConfig.accounts, "example-org-two": { accountId: 3, targetType: "Organization", identity: exampleIdentity } }
+  };
+
+  assert.equal(validateConfig(identityOnlyDefault).defaultAccount, "example-org-two");
+});
+
+test("mints with the App of the account's own credential block, not a shared one", async () => {
+  const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const otherApp = validateConfig({
+    defaultAccount: "example-org",
+    accounts: {
+      "example-org": {
+        accountId: 2,
+        targetType: "Organization",
+        credential: { type: "app", appId: 777, privateKeyPath: "/other/key.pem", installationId: 22 }
+      }
+    }
+  });
+  const jwts = [];
+  const responses = [
+    { id: 22, account: { id: 2, login: "example-org" }, target_type: "Organization", suspended_at: null },
+    { token: "installation-token" }
+  ];
+  const fetchImpl = async (url, options) => {
+    jwts.push(options.headers.Authorization.replace("Bearer ", ""));
+    return new Response(JSON.stringify(responses.shift()), { status: 200 });
+  };
+
+  await mintInstallationToken({
+    account: resolveAccount(otherApp, { account: "example-org" }),
+    privateKey,
+    fetchImpl,
+    apiUrl: "https://example.test"
+  });
+
+  assert.equal(JSON.parse(Buffer.from(jwts[0].split(".")[1], "base64url").toString()).iss, "777");
+});
+
+test("verifyInstallations lists and classifies installations once per distinct App", async () => {
+  const twoApps = validateConfig({
+    defaultAccount: "example-user",
+    accounts: {
+      "example-user": {
+        accountId: 1,
+        targetType: "User",
+        credential: { type: "app", appId: 100, privateKeyPath: "/keys/a.pem", installationId: 11 }
+      },
+      "example-org": {
+        accountId: 2,
+        targetType: "Organization",
+        credential: { type: "app", appId: 200, privateKeyPath: "/keys/b.pem", installationId: 22 }
+      }
+    }
+  });
+  const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const loadedKeys = [];
+  const installationsByApp = {
+    100: [
+      { id: 11, account: { id: 1, login: "example-user" }, target_type: "User", suspended_at: null },
+      { id: 55, account: { id: 5, login: "stranger" }, target_type: "User", suspended_at: null }
+    ],
+    200: [{ id: 22, account: { id: 2, login: "example-org" }, target_type: "Organization", suspended_at: null }]
+  };
+  const fetchImpl = async (url, options) => {
+    const iss = JSON.parse(Buffer.from(options.headers.Authorization.split(".")[1], "base64url").toString()).iss;
+
+    return new Response(JSON.stringify(installationsByApp[iss]), { status: 200 });
+  };
+
+  const result = await verifyInstallations({
+    config: twoApps,
+    fetchImpl,
+    apiUrl: "https://example.test",
+    loadKey: (keyPath) => {
+      loadedKeys.push(keyPath);
+
+      return privateKey;
+    }
+  });
+
+  assert.deepEqual(loadedKeys.sort(), ["/keys/a.pem", "/keys/b.pem"]);
+  assert.deepEqual(result.valid.sort(), ["example-org", "example-user"]);
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(result.unexpected.map((installation) => installation.id), [55]);
+});
+
+test("verifyPatAccount checks the token acts as the declared identity.login", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-pat-"));
+  const tokenPath = path.join(tempDir, "token");
+  fs.writeFileSync(tokenPath, "github_pat_example", { mode: 0o600 });
+
+  const entry = patEntryAt(tokenPath, { identity: { login: "example-machine", kind: "agent" } });
+  const fetchFor = (actingLogin) => async (url) => {
+    if (url.endsWith("/user")) {
+      return new Response(JSON.stringify({ login: actingLogin }), { status: 200 });
+    }
+
+    return new Response(JSON.stringify({ id: 3, type: "Organization" }), { status: 200 });
+  };
+
+  assert.deepEqual(
+    await verifyPatAccount("example-org-two", entry, { fetchImpl: fetchFor("Example-Machine"), apiUrl: "https://example.test" }),
+    { name: "example-org-two", ok: true }
+  );
+  assert.deepEqual(
+    await verifyPatAccount("example-org-two", entry, { fetchImpl: fetchFor("someone-else"), apiUrl: "https://example.test" }),
+    {
+      name: "example-org-two",
+      ok: false,
+      reason: "token acts as someone-else, not the declared identity.login example-machine"
+    }
+  );
+});
+
+test("config.example.json validates, covering credential-only, identity-only, and both", () => {
+  const examplePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../config.example.json");
+  const example = validateConfig(JSON.parse(fs.readFileSync(examplePath, "utf8")));
+
+  assert.ok(example.accounts["your-user"].credential && example.accounts["your-user"].identity);
+  assert.equal(example.accounts["your-org"].identity, undefined);
+  assert.equal(example.accounts["identity-only-org"].credential, undefined);
+  assert.equal(example.accounts["contractor-org"].identity.footerHost, "");
 });

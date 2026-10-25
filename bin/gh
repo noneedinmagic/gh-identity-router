@@ -40,5 +40,12 @@ elif remote_url="$(git config --get remote.origin.url 2>/dev/null)" && [[ -n "$r
   token_args=(--remote-url "$remote_url")
 fi
 
-token="$("$token_command" "${token_args[@]}")"
+# Exit 3 = the owner is identity-only (no credential block): mint nothing and let the
+# real gh use whatever credential it would have used without this wrapper.
+token_status=0
+token="$("$token_command" "${token_args[@]}")" || token_status=$?
+if ((token_status == 3)); then
+  exec "$real_gh" "$@"
+fi
+((token_status == 0)) || exit "$token_status"
 GH_TOKEN="$token" exec "$real_gh" "$@"

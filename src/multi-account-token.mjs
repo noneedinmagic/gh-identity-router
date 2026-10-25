@@ -73,6 +73,9 @@ export function parseRepositoryOwner(value) {
   return normalizeAccount(parts.at(-2));
 }
 
+// Reads the flat appId/privateKeyPath pair of a bootstrap config. Only
+// --discover-installations uses it: discovery runs before any per-account credential
+// block exists, so it cannot go through validateConfig.
 export function validateAppConfig(config) {
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     fail("Config must be a JSON object");
@@ -110,63 +113,137 @@ export function assertPrivateFile(filePath, label) {
   }
 }
 
-const ACCOUNT_TYPES = ["app", "pat"];
+const ENTRY_KEYS = ["accountId", "targetType", "host", "credential", "identity"];
+// Pre-v0.1 entries carried these flat on the entry; name the move instead of letting an
+// old config fail as "neither block present".
+const FLAT_CREDENTIAL_KEYS = ["type", "installationId", "tokenPath"];
+const CREDENTIAL_KEYS = {
+  app: ["type", "appId", "privateKeyPath", "installationId"],
+  pat: ["type", "tokenPath"]
+};
+const IDENTITY_KEYS = ["login", "displayName", "footerHost", "kind", "commitName", "commitEmail"];
+const IDENTITY_KINDS = ["agent", "human"];
+const SUPPORTED_HOST = "github.com";
+
+function requireObject(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+  }
+}
+
+function rejectUnknownKeys(value, allowed, label) {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+
+  if (unknown.length) {
+    fail(`${label} has unknown field: ${unknown.join(", ")}`);
+  }
+}
+
+function requireNumericId(value, label) {
+  if (!value || !String(value).match(/^\d+$/)) {
+    fail(`${label} must be a positive numeric ID`);
+  }
+
+  return Number(value);
+}
+
+function requireString(value, label) {
+  if (typeof value !== "string" || !value) {
+    fail(`${label} must be a non-empty string`);
+  }
+
+  return value;
+}
+
+function validateCredential(name, raw) {
+  const label = `Account ${name} credential`;
+
+  requireObject(raw, label);
+
+  if (!Object.hasOwn(CREDENTIAL_KEYS, raw.type)) {
+    fail(`${label} type must be app or pat, got: ${raw.type}`);
+  }
+
+  rejectUnknownKeys(raw, CREDENTIAL_KEYS[raw.type], `${label} (type ${raw.type})`);
+
+  if (raw.type === "pat") {
+    return { type: "pat", tokenPath: requireString(raw.tokenPath, `${label} field tokenPath`) };
+  }
+
+  return {
+    type: "app",
+    appId: String(requireNumericId(raw.appId, `${label} field appId`)),
+    privateKeyPath: requireString(raw.privateKeyPath, `${label} field privateKeyPath`),
+    installationId: requireNumericId(raw.installationId, `${label} field installationId`)
+  };
+}
+
+function validateIdentity(name, raw) {
+  const label = `Account ${name} identity`;
+
+  requireObject(raw, label);
+  rejectUnknownKeys(raw, IDENTITY_KEYS, label);
+
+  if (raw.kind !== undefined && !IDENTITY_KINDS.includes(raw.kind)) {
+    fail(`${label} kind must be agent or human, got: ${raw.kind}`);
+  }
+
+  const identity = { login: requireString(raw.login, `${label} field login`), kind: raw.kind ?? "agent" };
+
+  for (const key of ["displayName", "footerHost", "commitName", "commitEmail"]) {
+    if (raw[key] === undefined) {
+      continue;
+    }
+
+    if (typeof raw[key] !== "string") {
+      fail(`${label} field ${key} must be a string`);
+    }
+
+    identity[key] = raw[key];
+  }
+
+  return identity;
+}
 
 export function validateAccountEntry(name, rawEntry) {
-  if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
-    fail(`Account ${name} must be an object`);
+  requireObject(rawEntry, `Account ${name}`);
+
+  const flat = FLAT_CREDENTIAL_KEYS.filter((key) => rawEntry[key] !== undefined);
+
+  if (flat.length) {
+    fail(`Account ${name} sets ${flat.join(", ")} directly on the entry; move them under a "credential" block`);
   }
 
-  const type = rawEntry.type === undefined ? "app" : rawEntry.type;
+  rejectUnknownKeys(rawEntry, ENTRY_KEYS, `Account ${name}`);
 
-  if (!ACCOUNT_TYPES.includes(type)) {
-    fail(`Account ${name} has unknown type: ${rawEntry.type}`);
-  }
-
-  if (!rawEntry.accountId || !String(rawEntry.accountId).match(/^\d+$/)) {
-    fail(`Account ${name} field accountId must be a positive numeric ID`);
+  if (rawEntry.credential === undefined && rawEntry.identity === undefined) {
+    fail(`Account ${name} needs a credential block, an identity block, or both`);
   }
 
   if (!["User", "Organization"].includes(rawEntry.targetType)) {
     fail(`Account ${name} targetType must be User or Organization`);
   }
 
-  if (type === "app") {
-    if (rawEntry.tokenPath !== undefined) {
-      fail(`Account ${name} is app-typed and must not set tokenPath`);
-    }
-
-    if (!rawEntry.installationId || !String(rawEntry.installationId).match(/^\d+$/)) {
-      fail(`Account ${name} field installationId must be a positive numeric ID`);
-    }
-
-    return {
-      type,
-      accountId: Number(rawEntry.accountId),
-      installationId: Number(rawEntry.installationId),
-      targetType: rawEntry.targetType
-    };
-  }
-
-  if (rawEntry.installationId !== undefined) {
-    fail(`Account ${name} is pat-typed and must not set installationId`);
-  }
-
-  if (typeof rawEntry.tokenPath !== "string" || !rawEntry.tokenPath) {
-    fail(`Account ${name} field tokenPath must be a non-empty path`);
+  if (rawEntry.host !== undefined && rawEntry.host !== SUPPORTED_HOST) {
+    fail(`Account ${name} host must be ${SUPPORTED_HOST}; other hosts are not supported yet`);
   }
 
   return {
-    type,
-    accountId: Number(rawEntry.accountId),
+    accountId: requireNumericId(rawEntry.accountId, `Account ${name} field accountId`),
     targetType: rawEntry.targetType,
-    tokenPath: rawEntry.tokenPath
+    host: SUPPORTED_HOST,
+    ...(rawEntry.credential !== undefined && { credential: validateCredential(name, rawEntry.credential) }),
+    ...(rawEntry.identity !== undefined && { identity: validateIdentity(name, rawEntry.identity) })
   };
 }
 
 export function validateConfig(config) {
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     fail("Config must be a JSON object");
+  }
+
+  if (config.appId !== undefined || config.privateKeyPath !== undefined) {
+    fail("Config sets appId/privateKeyPath at the top level; move them under each App account's credential block");
   }
 
   if (!config.accounts || typeof config.accounts !== "object" || Array.isArray(config.accounts)) {
@@ -185,23 +262,19 @@ export function validateConfig(config) {
     accounts[name] = validateAccountEntry(name, rawEntry);
   }
 
-  const hasAppAccount = Object.values(accounts).some((entry) => entry.type === "app");
-  const appConfig = hasAppAccount ? validateAppConfig(config) : {};
   const defaultAccount = normalizeAccount(config.defaultAccount);
 
   if (!accounts[defaultAccount]) {
     fail(`Default account is not allow-listed: ${defaultAccount}`);
   }
 
-  if (hasAppAccount && accounts[defaultAccount].type !== "app") {
+  const hasAppAccount = Object.values(accounts).some((entry) => entry.credential?.type === "app");
+
+  if (hasAppAccount && accounts[defaultAccount].credential?.type === "pat") {
     fail(`Default account must be app-typed while the config also has an app-typed account: ${defaultAccount}`);
   }
 
-  return {
-    ...appConfig,
-    defaultAccount,
-    accounts
-  };
+  return { defaultAccount, accounts };
 }
 
 export function readPatToken(account) {
@@ -248,7 +321,7 @@ function resolveOwnerSelector(rawValue, label) {
   return owner;
 }
 
-export function resolveAccount(config, selectors = {}) {
+export function resolveAccount(config, selectors = {}, { allowDefault = true } = {}) {
   const explicitAccount = selectors.account ? normalizeAccount(selectors.account) : null;
   const repositoryOwner = resolveOwnerSelector(selectors.repository, "--repo");
   const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL");
@@ -259,7 +332,11 @@ export function resolveAccount(config, selectors = {}) {
     ?? repositoryOwner
     ?? remoteOwner
     ?? environmentAccount
-    ?? config.defaultAccount;
+    ?? (allowDefault ? config.defaultAccount : null);
+
+  if (!selected) {
+    fail("No GitHub owner could be resolved from --repo, remote URL, or the environment");
+  }
 
   if (!config.accounts[selected]) {
     fail(`GitHub account is not allow-listed: ${selected}`);
@@ -314,7 +391,7 @@ async function githubRequest(fetchImpl, apiUrl, appJwt, pathname, options = {}) 
 
 export async function verifyPatAccount(name, account, { fetchImpl = fetch, apiUrl = DEFAULT_API_URL } = {}) {
   try {
-    const token = readPatToken({ ...account, name });
+    const token = readPatToken({ name, tokenPath: account.credential.tokenPath });
     const rateLimitResponse = await timedFetch(fetchImpl, `${apiUrl}/rate_limit`, token);
 
     if (!rateLimitResponse.ok) {
@@ -344,6 +421,22 @@ export async function verifyPatAccount(name, account, { fetchImpl = fetch, apiUr
       return { name, ok: false, reason: `owner metadata does not match ${name}` };
     }
 
+    // A PAT acts as whoever owns it, which may not be the resource owner: when the entry
+    // declares a login, the token must belong to exactly that account.
+    if (account.identity) {
+      const userResponse = await timedFetch(fetchImpl, `${apiUrl}/user`, token);
+
+      if (!userResponse.ok) {
+        return { name, ok: false, reason: `acting login lookup failed: ${userResponse.status} ${userResponse.statusText}` };
+      }
+
+      const actingLogin = String((await userResponse.json()).login ?? "");
+
+      if (actingLogin.toLowerCase() !== account.identity.login.toLowerCase()) {
+        return { name, ok: false, reason: `token acts as ${actingLogin}, not the declared identity.login ${account.identity.login}` };
+      }
+    }
+
     return { name, ok: true };
   } catch (error) {
     return { name, ok: false, reason: error instanceof Error ? error.message : String(error) };
@@ -351,7 +444,6 @@ export async function verifyPatAccount(name, account, { fetchImpl = fetch, apiUr
 }
 
 export async function mintInstallationToken({
-  config,
   account,
   privateKey,
   fetchImpl = fetch,
@@ -359,30 +451,31 @@ export async function mintInstallationToken({
   repositories,
   permissions
 }) {
-  const appJwt = createAppJwt(config.appId, privateKey);
+  const { appId, installationId } = account.credential;
+  const appJwt = createAppJwt(appId, privateKey);
   const installationResponse = await githubRequest(
     fetchImpl,
     apiUrl,
     appJwt,
-    `/app/installations/${account.installationId}`
+    `/app/installations/${installationId}`
   );
   const installation = await installationResponse.json();
   const actualLogin = normalizeAccount(installation.account?.login ?? "");
 
   if (Number(installation.account?.id) !== account.accountId) {
-    fail(`Installation ${account.installationId} account ID does not match ${account.name}`);
+    fail(`Installation ${installationId} account ID does not match ${account.name}`);
   }
 
   if (actualLogin !== account.name) {
-    fail(`Installation ${account.installationId} belongs to ${actualLogin}, not ${account.name}`);
+    fail(`Installation ${installationId} belongs to ${actualLogin}, not ${account.name}`);
   }
 
   if (installation.target_type !== account.targetType) {
-    fail(`Installation ${account.installationId} target type does not match ${account.name}`);
+    fail(`Installation ${installationId} target type does not match ${account.name}`);
   }
 
   if (installation.suspended_at) {
-    fail(`Installation ${account.installationId} for ${account.name} is suspended`);
+    fail(`Installation ${installationId} for ${account.name} is suspended`);
   }
 
   const scope = {};
@@ -399,7 +492,7 @@ export async function mintInstallationToken({
     fetchImpl,
     apiUrl,
     appJwt,
-    `/app/installations/${account.installationId}/access_tokens`,
+    `/app/installations/${installationId}/access_tokens`,
     Object.keys(scope).length
       ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scope) }
       : { method: "POST" }
@@ -414,9 +507,9 @@ export async function mintInstallationToken({
 }
 
 export function classifyInstallations(config, installations) {
-  const appAccounts = Object.entries(config.accounts).filter(([, entry]) => entry.type === "app");
+  const appAccounts = Object.entries(config.accounts).filter(([, entry]) => entry.credential?.type === "app");
   const configuredById = new Map(
-    appAccounts.map(([name, entry]) => [entry.installationId, { name, ...entry }])
+    appAccounts.map(([name, entry]) => [entry.credential.installationId, { name, ...entry }])
   );
   const seen = new Set();
   const valid = [];
@@ -487,22 +580,50 @@ export async function listAppInstallations({
   return installations;
 }
 
-export async function verifyInstallations({ config, privateKey, fetchImpl = fetch, apiUrl = DEFAULT_API_URL }) {
-  const hasAppAccount = Object.values(config.accounts).some((entry) => entry.type === "app");
-  const classification = hasAppAccount
-    ? classifyInstallations(
-      config,
-      await listAppInstallations({ appConfig: config, privateKey, fetchImpl, apiUrl })
-    )
-    : { valid: [], problems: [], unexpected: [] };
+// Each App entry carries its own appId/privateKeyPath, so installations are listed and
+// classified once per distinct App — an installation only means something against the
+// App that owns it.
+export async function verifyInstallations({
+  config,
+  fetchImpl = fetch,
+  apiUrl = DEFAULT_API_URL,
+  loadKey = loadPrivateKey
+}) {
+  const appGroups = new Map();
+  const patAccounts = [];
 
-  const patAccounts = Object.entries(config.accounts).filter(([, entry]) => entry.type === "pat");
+  for (const [name, entry] of Object.entries(config.accounts)) {
+    if (entry.credential?.type === "app") {
+      const { appId, privateKeyPath } = entry.credential;
+      const key = `${appId}\0${privateKeyPath}`;
+
+      appGroups.set(key, { appId, privateKeyPath, accounts: { ...appGroups.get(key)?.accounts, [name]: entry } });
+    } else if (entry.credential?.type === "pat") {
+      patAccounts.push([name, entry]);
+    }
+  }
+
+  const valid = [];
+  const problems = [];
+  const unexpected = [];
+
+  for (const { appId, privateKeyPath, accounts } of appGroups.values()) {
+    const installations = await listAppInstallations({
+      appConfig: { appId, privateKeyPath },
+      privateKey: loadKey(privateKeyPath),
+      fetchImpl,
+      apiUrl
+    });
+    const classification = classifyInstallations({ accounts }, installations);
+
+    valid.push(...classification.valid);
+    problems.push(...classification.problems);
+    unexpected.push(...classification.unexpected);
+  }
+
   const patResults = await Promise.all(
     patAccounts.map(([name, entry]) => verifyPatAccount(name, entry, { fetchImpl, apiUrl }))
   );
-
-  const valid = [...classification.valid];
-  const problems = [...classification.problems];
 
   for (const result of patResults) {
     if (result.ok) {
@@ -512,7 +633,7 @@ export async function verifyInstallations({ config, privateKey, fetchImpl = fetc
     }
   }
 
-  return { valid, problems, unexpected: classification.unexpected };
+  return { valid, problems, unexpected };
 }
 
 export function parseRepositoriesArgument(value) {
@@ -611,6 +732,17 @@ function readJsonConfig(configPath) {
   return rawConfig;
 }
 
+// The one place that knows where the config lives; the identity check reads the same file.
+export function loadRawConfig(env = process.env) {
+  const configPath = env.IDENTITY_ROUTER_CONFIG
+    ?? path.join(os.homedir(), ".config", "gh-identity-router", "config.json");
+  const rawConfig = readJsonConfig(configPath);
+
+  assertPrivateFile(configPath, "Config file");
+
+  return rawConfig;
+}
+
 function readPrivateKey(privateKeyPath) {
   try {
     return fs.readFileSync(privateKeyPath, "utf8");
@@ -619,17 +751,23 @@ function readPrivateKey(privateKeyPath) {
   }
 }
 
+function loadPrivateKey(privateKeyPath) {
+  assertPrivateFile(privateKeyPath, "Private key");
+
+  return readPrivateKey(privateKeyPath);
+}
+
+// An identity-only entry is valid config but has nothing to mint; wrappers key off this
+// exit code to fall back to the caller's own gh/git credential instead of failing.
+export const EXIT_NO_CREDENTIAL = 3;
+
 async function main() {
   const args = parseArguments(process.argv.slice(2));
-  const configPath = process.env.IDENTITY_ROUTER_CONFIG
-    ?? path.join(os.homedir(), ".config", "gh-identity-router", "config.json");
-  const rawConfig = readJsonConfig(configPath);
-  assertPrivateFile(configPath, "Config file");
+  const rawConfig = loadRawConfig(process.env);
 
   if (args.discoverInstallations) {
     const appConfig = validateAppConfig(rawConfig);
-    assertPrivateFile(appConfig.privateKeyPath, "Private key");
-    const privateKey = readPrivateKey(appConfig.privateKeyPath);
+    const privateKey = loadPrivateKey(appConfig.privateKeyPath);
     const installations = await listAppInstallations({ appConfig, privateKey });
     const header = [
       "LOGIN",
@@ -659,16 +797,9 @@ async function main() {
   }
 
   const config = validateConfig(rawConfig);
-  const hasAppAccount = Object.values(config.accounts).some((entry) => entry.type === "app");
-  let privateKey;
-
-  if (hasAppAccount) {
-    assertPrivateFile(config.privateKeyPath, "Private key");
-    privateKey = readPrivateKey(config.privateKeyPath);
-  }
 
   if (args.verify) {
-    const result = await verifyInstallations({ config, privateKey });
+    const result = await verifyInstallations({ config });
 
     for (const name of result.valid.sort()) {
       process.stdout.write(`OK ${name}\n`);
@@ -695,16 +826,24 @@ async function main() {
     environmentAccount: process.env.IDENTITY_ROUTER_ORG
   });
 
-  if (account.type === "pat" && (args.repositories || args.permissions)) {
+  if (!account.credential) {
+    throw Object.assign(
+      new Error(`Account ${account.name} has no credential block (identity only); no token minted`),
+      { exitCode: EXIT_NO_CREDENTIAL }
+    );
+  }
+
+  const { credential } = account;
+
+  if (credential.type === "pat" && (args.repositories || args.permissions)) {
     fail(`Account ${account.name} is pat-typed; --repositories/--permissions only narrow an App installation token`);
   }
 
-  const token = account.type === "pat"
-    ? readPatToken(account)
+  const token = credential.type === "pat"
+    ? readPatToken({ name: account.name, tokenPath: credential.tokenPath })
     : await mintInstallationToken({
-      config,
       account,
-      privateKey,
+      privateKey: loadPrivateKey(credential.privateKeyPath),
       repositories: args.repositories,
       permissions: args.permissions
     });
@@ -724,6 +863,6 @@ if (isEntrypoint) {
 
   main().catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
+    process.exitCode = error.exitCode ?? 1;
   });
 }

@@ -170,7 +170,7 @@ function realTokenCommandConfig(prefix) {
   fs.writeFileSync(configPath, JSON.stringify({
     defaultAccount: "example-org",
     accounts: {
-      "example-org": { type: "pat", accountId: 1, targetType: "Organization", tokenPath }
+      "example-org": { accountId: 1, targetType: "Organization", credential: { type: "pat", tokenPath } }
     }
   }), { mode: 0o600 });
 
@@ -243,6 +243,57 @@ test("Git credential helper exits non-zero with empty stdout when token minting 
   });
 
   assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
+});
+
+test("gh wrapper runs the real gh without GH_TOKEN when the token command reports an identity-only owner", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-gh-identity-only-"));
+  const logPath = path.join(tempDir, "log");
+  const tokenCommand = path.join(tempDir, "token");
+  const ghCommand = path.join(tempDir, "gh-real");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nexit 3\n");
+  executable(ghCommand, `#!/usr/bin/env bash\nprintf 'gh-token:[%s] args:%s\\n' "\${GH_TOKEN-unset}" "$*" >>"${logPath}"\n`);
+
+  const result = spawnSync(path.join(toolDir, "bin", "gh"), ["pr", "list", "--repo", "example-org/repo"], {
+    encoding: "utf8",
+    env: { ...process.env, GH_TOKEN: undefined, IDENTITY_ROUTER_REAL_GH: ghCommand, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(fs.readFileSync(logPath, "utf8").trim(), "gh-token:[unset] args:pr list --repo example-org/repo");
+});
+
+test("gh wrapper still fails closed on any other token command failure", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-gh-token-fail-"));
+  const logPath = path.join(tempDir, "log");
+  const tokenCommand = path.join(tempDir, "token");
+  const ghCommand = path.join(tempDir, "gh-real");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nexit 1\n");
+  executable(ghCommand, `#!/usr/bin/env bash\necho ran >>"${logPath}"\n`);
+
+  const result = spawnSync(path.join(toolDir, "bin", "gh"), ["pr", "list", "--repo", "example-org/repo"], {
+    encoding: "utf8",
+    env: { ...process.env, IDENTITY_ROUTER_REAL_GH: ghCommand, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.equal(result.status, 1);
+  assert.equal(fs.existsSync(logPath), false);
+});
+
+test("Git credential helper answers nothing, successfully, for an identity-only owner", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-credential-identity-only-"));
+  const tokenCommand = path.join(tempDir, "token");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nexit 3\n");
+  const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
+    input: "protocol=https\nhost=github.com\npath=example-org/repo.git\n\n",
+    encoding: "utf8",
+    env: { ...process.env, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.equal(result.status, 0);
   assert.equal(result.stdout, "");
 });
 
