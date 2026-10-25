@@ -4,6 +4,5 @@
 # risk.human_required_paths.
 /src/           @noneedinmagic
 /bin/           @noneedinmagic
-/install.sh     @noneedinmagic
 /scripts/       @noneedinmagic
 /.github/       @noneedinmagic
