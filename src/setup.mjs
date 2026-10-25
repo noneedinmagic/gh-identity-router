@@ -4,6 +4,7 @@
 // taken by the first setup, i.e. the state before this tool touched anything.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -533,7 +534,28 @@ function verifyInstall({ l, launcher, configPath, verifyCommand, includes }) {
         || live[1] !== email;
     });
 
-    return stale.length ? `missing or out of date for ${stale.map((s) => s.owner).join(", ")} (re-run setup)` : null;
+    if (stale.length) {
+      return `missing or out of date for ${stale.map((s) => s.owner).join(", ")} (re-run setup)`;
+    }
+
+    // The entry existing is not enough: an older Git ignores hasconfig:, and a [user]
+    // section placed below the include overrides it. Ask Git what a clone would get.
+    const probe = fs.mkdtempSync(path.join(os.tmpdir(), "gh-identity-router-probe-"));
+
+    try {
+      git(["init", "-q", probe]);
+      for (const { owner, name } of includes) {
+        git(["-C", probe, "remote", "remove", "origin"], [0, 2]);
+        git(["-C", probe, "remote", "add", "origin", `https://github.com/${owner}/probe`]);
+        if (git(["-C", probe, "config", "user.name"], [0, 1]).trim() !== name) {
+          return `Git does not apply the commit author for ${owner}; needs Git 2.36+ and the include below any [user] section`;
+        }
+      }
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
+    }
+
+    return null;
   });
   check("live credential verification", () => liveVerify(verifyCommand ?? launcher, ["--verify"], configPath));
 

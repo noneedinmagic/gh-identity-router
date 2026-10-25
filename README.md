@@ -423,7 +423,10 @@ restores the state from before the **first** `setup` (so running `setup` twice a
 `uninstall` still undoes everything): the prior files at every installed path, the exact
 prior values (including absent and empty Git settings) for
 `credential.https://github.com.{helper,username,useHttpPath}`, and the prior commit-author
-includes. It removes the generated fragments. `uninstall --backup DIR` restores a specific
+includes. It removes the generated fragments. (If you installed with the old `install.sh`,
+the first `setup` records *that* install as its baseline; to get back to the state before
+it, run `uninstall --backup` with your oldest backup under
+`~/.local/state/gh-identity-router/backups/`.) `uninstall --backup DIR` restores a specific
 backup instead (for example the one `setup` printed).
 
 Restore accepts only a valid manifest below the current home's managed backup root.

@@ -669,13 +669,16 @@ test("setup generates a commit-author includeIf fragment that Git actually appli
     return dir;
   };
 
+  // The home identity is already global; the include has to win over it, not just exist.
+  git(fixture.home, fixture.home, "config", "--global", "user.name", "home-agent");
+  git(fixture.home, fixture.home, "config", "--global", "user.email", "home@example.com");
   execFileSync(cli, ["setup"], { env: fixture.env });
 
   const author = (owner, key) => git(fixture.home, clone(owner), "config", key);
   assert.equal(author("example-org", "user.name").stdout.trim(), "example-bot[bot]");
   assert.equal(author("example-org", "user.email").stdout.trim(), "1+example-bot[bot]@users.noreply.github.com");
-  // An owner without commit fields gets no include, so Git has no author to fall back on.
-  assert.equal(author("plain-org", "user.name").status, 1);
+  // An owner without commit fields gets no include and keeps the home identity.
+  assert.equal(author("plain-org", "user.name").stdout.trim(), "home-agent");
 });
 
 test("setup refuses a half-set commit author before changing anything", () => {
@@ -730,7 +733,8 @@ test("the installed multi-account-token launcher works with no node on PATH", ()
   assert.doesNotMatch(text, /env node/);
 
   const env = { ...fixture.env, PATH: emptyPath };
-  assert.notEqual(spawnSync("sh", ["-c", "command -v node"], { env }).status, 0, "control: PATH really has no node");
+  // Absolute /bin/sh so the shell itself starts; a null status (spawn failure) fails this.
+  assert.ok(spawnSync("/bin/sh", ["-c", "command -v node"], { env }).status > 0, "control: PATH really has no node");
 
   // plain-org is identity-only: exit 3 and this message can only come from the script
   // running under node.
