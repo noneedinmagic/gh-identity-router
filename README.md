@@ -99,10 +99,14 @@ breaking change), and two independent, optional blocks — at least one is requi
 resolved for a `gh` call. It never supplies an identity.
 
 To find the installation IDs for an App, run discovery against a small bootstrap config
-(a file you create by hand; nothing installs it) that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
-the flat pair is still read, since discovery runs before any account entry exists:
+that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
+the flat pair is still read, since discovery runs before any account entry exists. Nothing
+installs it: copy [`bootstrap.example.json`](bootstrap.example.json) from this repository
+and fill in your App's values:
 
 ```bash
+cp bootstrap.example.json ~/.config/gh-identity-router/bootstrap.json
+chmod 600 ~/.config/gh-identity-router/bootstrap.json
 IDENTITY_ROUTER_CONFIG=~/.config/gh-identity-router/bootstrap.json \
   ./src/multi-account-token.mjs --discover-installations
 ```

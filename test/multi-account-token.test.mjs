@@ -852,3 +852,12 @@ test("config.example.json validates, covering credential-only, identity-only, an
   assert.equal(example.accounts["identity-only-org"].credential, undefined);
   assert.equal(example.accounts["contractor-org"].identity.footerHost, "");
 });
+
+test("bootstrap.example.json validates as a discovery bootstrap config", () => {
+  const examplePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bootstrap.example.json");
+
+  assert.deepEqual(validateAppConfig(JSON.parse(fs.readFileSync(examplePath, "utf8"))), {
+    appId: "123456",
+    privateKeyPath: "/home/USER/.config/gh-identity-router/private-key.pem"
+  });
+});
