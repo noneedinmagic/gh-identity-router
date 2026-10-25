@@ -1,0 +1,4 @@
+{
+  "appId": 123456,
+  "privateKeyPath": "/home/USER/.config/gh-identity-router/private-key.pem"
+}

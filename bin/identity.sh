@@ -7,8 +7,7 @@
 # (~/.local/bin/identity.sh + ~/.local/share/gh-identity-router/identity.mjs, which sits
 # beside multi-account-token.mjs so its relative import resolves).
 #
-# Usage, exit codes: see src/identity.mjs's own header comment — unchanged from before
-# the port.
+# Usage, exit codes: see src/identity.mjs's own header comment.
 set -eu
 
 # Follow symlinks so a linked invocation resolves src/ relative to the real script.

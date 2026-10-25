@@ -1,8 +1,13 @@
 #!/usr/bin/env node
-// Resolves this agent's identity by comparing what it CLAIMS to be (the identity file,
-// if declared) against what it actually IS (the credential that authenticates git/gh).
-// Never state identity as fact — always resolve it. bin/identity.sh is a thin POSIX-sh
-// shim that delegates argv/exit code straight to this file.
+// Resolves this agent's identity by comparing what it CLAIMS to be (the `identity` block
+// of the target owner's account entry in the router config) against what it actually IS
+// (the credential that authenticates git/gh). Never state identity as fact — always
+// resolve it. bin/identity.sh is a thin POSIX-sh shim that delegates argv/exit code
+// straight to this file.
+//
+// The target owner comes from the same selectors the token helper uses — GH_REPO, then
+// the current repository's origin URL, then IDENTITY_ROUTER_ORG — except that
+// `defaultAccount` is never consulted: it routes tokens, it never supplies an identity.
 //
 // Usage (via bin/identity.sh, or `node src/identity.mjs` directly):
 //   identity.sh                  diagnostic block (for a human, or an agent
@@ -15,17 +20,17 @@
 //   identity.sh --self-check     run built-in fixtures, print pass/fail.
 //
 // Exit codes: 0 ok, 1 declared identity does not match the derived credential,
-// 2 the derived credential is a human account not explicitly opted in. Under
-// --footer, 2 is also reused for the opted-in kind: human case — the footer
-// is refused, not the identity itself.
+// 2 refused: the owner cannot be resolved or is not allow-listed, the owner has no
+// identity block (credential only, so no signer is declared — --check refuses too), or
+// the derived credential is a human account not explicitly opted in. Under --footer, 2
+// is also used for kind: human — the footer is refused, not the identity itself.
 
-import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-import { checkNodeVersion } from "./multi-account-token.mjs";
+import { checkNodeVersion, loadRawConfig, resolveAccount, validateConfig } from "./multi-account-token.mjs";
 
 const GH_AUTH_STATUS_TIMEOUT_MS = 10_000;
 
@@ -76,6 +81,12 @@ function gitConfigUserName() {
   const result = spawnSync("git", ["config", "user.name"], { encoding: "utf8" });
 
   return (result.stdout ?? "").trim();
+}
+
+function gitOriginUrl() {
+  const result = spawnSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8" });
+
+  return result.error || result.status !== 0 ? "" : (result.stdout ?? "").trim();
 }
 
 function gitCurrentBranch() {
@@ -131,77 +142,67 @@ export function deriveLogin({ ghBin = "gh" } = {}) {
 }
 
 // --- the security-relevant decision, isolated for testing -------------------
-// derivedRaw: the raw (unnormalized) derived login. declaredApp: from the identity
-// file, "" if absent. declaredKind: "human" or "" (unset). Returns 0/1/2 — the same
-// values used as bin/identity.sh's exit code.
-export function decideStatus(derivedRaw, declaredApp, declaredKind) {
-  const derived = normalizeLogin(derivedRaw);
+// derivedRaw: the raw (unnormalized) derived login. declaredLogin: identity.login ("" =
+// no declaration; resolve() never passes that, since an owner with no identity block is
+// refused before this point). declaredKind: identity.kind, "" if none. credentialType:
+// the entry's credential.type, "" if none. Returns 0/1/2 — the same values used as
+// bin/identity.sh's exit code.
+//
+// A login that is not bot-shaped is a person's account, and is accepted only when the
+// declaration names exactly that login AND vouches for it: kind: human (the owner acting
+// directly) or a PAT credential (a purpose-made machine user). Nothing else opts a
+// non-bot login in — in particular no declaration can bless a login it does not name.
+export function decideStatus(derivedRaw, declaredLogin, declaredKind, credentialType = "") {
+  const derived = normalizeLogin(derivedRaw).toLowerCase();
+  const declared = declaredLogin.toLowerCase();
 
   if (!isBotShaped(derivedRaw)) {
-    // Not bot-shaped (including "nothing could be derived at all" — fail closed rather
-    // than assume a safe default): refuse unless explicitly opted in via kind: human
-    // with a matching declared app.
-    if (declaredKind !== "human" || declaredApp !== derived) {
+    // Includes "nothing could be derived at all" — fail closed rather than assume a
+    // safe default.
+    if (!declared || declared !== derived || (declaredKind !== "human" && credentialType !== "pat")) {
       return 2;
     }
   }
 
-  if (declaredApp && declaredApp !== derived) {
+  if (declared && declared !== derived) {
     return 1;
   }
 
   return 0;
 }
 
-function readIdentityFile(identityFile) {
-  if (!identityFile) {
-    return null;
-  }
-
+// Finds the account whose identity block applies. Never throws: an unreadable or invalid
+// config, an unresolvable owner, and an owner outside the allow-list are all the same
+// answer to the caller — no identity applies, so nothing may be signed with one.
+export function resolveIdentityAccount(env = process.env) {
   try {
-    return fs.readFileSync(identityFile, "utf8");
-  } catch {
-    return null;
+    const config = validateConfig(loadRawConfig(env));
+    const account = resolveAccount(
+      config,
+      {
+        repository: env.GH_REPO,
+        remoteUrl: env.GH_REPO ? undefined : gitOriginUrl(),
+        environmentAccount: env.IDENTITY_ROUTER_ORG
+      },
+      { allowDefault: false }
+    );
+
+    return { account, refusal: "" };
+  } catch (error) {
+    return { account: null, refusal: error instanceof Error ? error.message : String(error) };
   }
 }
 
-export function readDeclared(key, identityFile) {
-  const content = readIdentityFile(identityFile);
-
-  if (content === null) {
-    return "";
-  }
-
-  const match = new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(content);
-
-  return match ? match[1] : "";
+// footerHost is the one identity field where "absent" and "present but empty" mean
+// different things (fall back to `os.hostname()` vs. suppress the host from the footer
+// entirely).
+function footerHostOf(identity) {
+  return identity?.footerHost === undefined ? os.hostname() : identity.footerHost;
 }
 
-// host is the one declared field where "absent" and "present but empty" mean different
-// things (fall back to `os.hostname()` vs. suppress the host from the footer entirely),
-// so it can't share readDeclared's plain-string return.
-export function readDeclaredHost(identityFile) {
-  const content = readIdentityFile(identityFile);
-
-  if (content === null || !/^host:/m.test(content)) {
-    return { declared: false, value: "" };
-  }
-
-  const match = /^host:[ \t]*(.*)$/m.exec(content);
-
-  return { declared: true, value: match ? match[1] : "" };
-}
-
-// A copied-but-unedited example config or doc often leaves a placeholder like
-// `<your GitHub login>` in place. If one was copied unedited, say so instead of a
-// confusing "not opted in".
-export function looksLikeUnfilledTemplate(value) {
-  return /<[^>]*>/.test(value ?? "");
-}
-
-export function resolve({ runtimeOverride = "", env = process.env, identityFile, ghBin } = {}) {
-  const hostDeclared = readDeclaredHost(identityFile);
-  const host = hostDeclared.declared ? hostDeclared.value : os.hostname();
+export function resolve({ runtimeOverride = "", env = process.env, ghBin } = {}) {
+  const { account, refusal } = resolveIdentityAccount(env);
+  const identity = account?.identity ?? null;
   const runtime = detectRuntime(runtimeOverride, env);
 
   const { derivedLogin: derivedRaw, derivedSource } = deriveLogin({ ghBin });
@@ -215,21 +216,17 @@ export function resolve({ runtimeOverride = "", env = process.env, identityFile,
     crossCheckWarning = `warning: gh account (${derived}) differs from git config user.name (${gitUser}) — commits and the push may be attributed to different identities.`;
   }
 
-  let declaredApp = readDeclared("app", identityFile);
-  let declaredName = readDeclared("display_name", identityFile);
-  const declaredKind = readDeclared("kind", identityFile);
-  let templateWarning = "";
-
-  if (looksLikeUnfilledTemplate(declaredApp) || looksLikeUnfilledTemplate(declaredName)) {
-    templateWarning = `warning: ${identityFile} still has an unfilled <placeholder> — replace every <...> before it counts as a declaration. See this project's README for the file's format, or ask the human owner to fill in app/display_name/kind by hand.`;
-    declaredApp = "";
-    declaredName = "";
-  }
-
-  const status = decideStatus(derivedRaw, declaredApp, declaredKind);
+  // No identity block means no declared signer: refuse before decideStatus, which would
+  // accept any bot-shaped login against an empty declaration.
+  const status = account && identity
+    ? decideStatus(derivedRaw, identity?.login ?? "", identity?.kind ?? "", account.credential?.type)
+    : 2;
 
   return {
-    host,
+    owner: account?.name ?? "",
+    refusal,
+    identity,
+    host: footerHostOf(identity),
     runtime,
     derivedRaw,
     derived,
@@ -237,23 +234,22 @@ export function resolve({ runtimeOverride = "", env = process.env, identityFile,
     gitUserRaw,
     gitUser,
     crossCheckWarning,
-    declaredApp,
-    declaredName,
-    declaredKind,
-    templateWarning,
+    declaredLogin: identity?.login ?? "",
+    declaredName: identity?.displayName ?? "",
+    declaredKind: identity?.kind ?? "",
     status
   };
 }
 
-export function printBlock(state, identityFile) {
+export function printBlock(state) {
   const lines = [];
 
-  if (state.declaredApp) {
-    lines.push(`declared: ${state.declaredApp}  (${state.declaredName})`);
-  } else if (state.templateWarning) {
-    lines.push("declared: (unfilled template — see warning below)");
+  if (state.identity) {
+    lines.push(`declared: ${state.declaredLogin}  (${state.declaredName || state.declaredLogin})`);
+  } else if (state.owner) {
+    lines.push(`declared: (none — REFUSED, no identity block for ${state.owner})`);
   } else {
-    lines.push(`declared: (none — status UNVERIFIED, no ${identityFile})`);
+    lines.push("declared: (none — no owner resolved)");
   }
 
   lines.push(`derived:  ${state.derivedRaw}`);
@@ -261,7 +257,7 @@ export function printBlock(state, identityFile) {
   if (state.host) {
     lines.push(`host:     ${state.host}`);
   } else {
-    lines.push(`host:     (suppressed — host: declared empty in ${identityFile})`);
+    lines.push("host:     (suppressed — footerHost is empty)");
   }
 
   lines.push(`runtime:  ${state.runtime}`);
@@ -270,16 +266,14 @@ export function printBlock(state, identityFile) {
     lines.push(state.crossCheckWarning);
   }
 
-  if (state.templateWarning) {
-    lines.push(state.templateWarning);
-  }
-
-  if (state.status === 0) {
-    lines.push(state.declaredApp ? "OK" : `UNVERIFIED (no ${identityFile} — derived identity used as-is)`);
+  if (!state.owner) {
+    lines.push(`REFUSED: no identity applies — ${state.refusal}`);
+  } else if (state.status === 0) {
+    lines.push("OK");
   } else if (state.status === 1) {
-    lines.push(`MISMATCH: declared app '${state.declaredApp}' != derived '${state.derived}' (derived via ${state.derivedSource})`);
+    lines.push(`MISMATCH: declared login '${state.declaredLogin}' != derived '${state.derived}' (derived via ${state.derivedSource})`);
   } else {
-    lines.push(`REFUSED: derived credential '${state.derivedRaw}' (derived via ${state.derivedSource}) is a human account and is not explicitly declared as kind: human in ${identityFile}`);
+    lines.push(`REFUSED: derived credential '${state.derivedRaw}' (derived via ${state.derivedSource}) ${state.identity ? `is a human account and is not explicitly declared as kind: human or a PAT credential for ${state.owner}` : `cannot be verified: ${state.owner} has no identity block, so no signer is declared`}`);
   }
 
   return `${lines.join("\n")}\n`;
@@ -363,22 +357,14 @@ export function printFooter(state, env = process.env, ctx = {}) {
 
 // --- footer emission decision, isolated for testing -------------------
 // A kind: human declaration means the PR is human-authored — attaching an agent footer
-// to it would misattribute it.
-export function footerAllowed(status, declaredKind) {
-  if (status !== 0 || declaredKind === "human") {
+// to it would misattribute it. An owner with no identity block (credential only) has
+// nothing to sign with.
+export function footerAllowed(status, declaredKind, hasIdentity) {
+  if (status !== 0 || declaredKind === "human" || !hasIdentity) {
     return 0;
   }
 
   return 1;
-}
-
-function tempFixtureFile(content) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "identity-self-check-"));
-  const file = path.join(dir, "fixture");
-
-  fs.writeFileSync(file, content);
-
-  return file;
 }
 
 function runSelfCheck() {
@@ -406,17 +392,23 @@ function runSelfCheck() {
 
   check("decide_status: bot, no declaration -> unverified OK", String(decideStatus("example-agent[bot]", "", "")), "0");
   check("decide_status: bot, matching declaration -> OK", String(decideStatus("example-agent[bot]", "example-agent", "")), "0");
+  check("decide_status: bot, declaration differs only by case -> OK", String(decideStatus("Example-Agent[bot]", "example-agent", "")), "0");
   check("decide_status: bot, mismatched declaration -> MISMATCH", String(decideStatus("example-agent[bot]", "example-agent-two", "")), "1");
   check("decide_status: app-prefixed bot, matching declaration -> OK", String(decideStatus("app/example-agent-two", "example-agent-two", "")), "0");
   check("decide_status: human login, not opted in -> REFUSED", String(decideStatus("example-user", "", "")), "2");
+  check("decide_status: human login, declared but kind agent -> REFUSED", String(decideStatus("example-user", "example-user", "agent")), "2");
   check("decide_status: human login, opted in and matching -> OK", String(decideStatus("example-user", "example-user", "human")), "0");
-  check("decide_status: human login, opted in but wrong app -> REFUSED", String(decideStatus("example-user", "someoneelse", "human")), "2");
+  check("decide_status: human login, opted in but wrong login -> REFUSED", String(decideStatus("example-user", "someoneelse", "human")), "2");
+  check("decide_status: PAT machine user, matching login -> OK", String(decideStatus("example-machine", "example-machine", "agent", "pat")), "0");
+  check("decide_status: PAT machine user, other login -> REFUSED", String(decideStatus("example-user", "example-machine", "agent", "pat")), "2");
+  check("decide_status: app credential never vouches for a plain login", String(decideStatus("example-user", "example-user", "agent", "app")), "2");
   check("decide_status: nothing derivable -> REFUSED (fail closed)", String(decideStatus("", "", "")), "2");
 
-  check("footer_allowed: OK, no kind -> allowed", String(footerAllowed(0, "")), "1");
-  check("footer_allowed: OK, kind human -> suppressed", String(footerAllowed(0, "human")), "0");
-  check("footer_allowed: MISMATCH -> suppressed", String(footerAllowed(1, "")), "0");
-  check("footer_allowed: REFUSED -> suppressed", String(footerAllowed(2, "")), "0");
+  check("footer_allowed: OK, identity declared -> allowed", String(footerAllowed(0, "agent", true)), "1");
+  check("footer_allowed: OK, kind human -> suppressed", String(footerAllowed(0, "human", true)), "0");
+  check("footer_allowed: OK, credential only -> suppressed", String(footerAllowed(0, "", false)), "0");
+  check("footer_allowed: MISMATCH -> suppressed", String(footerAllowed(1, "agent", true)), "0");
+  check("footer_allowed: REFUSED -> suppressed", String(footerAllowed(2, "agent", true)), "0");
 
   check("session_fragment: set", sessionFragment({ CLAUDE_CODE_SESSION_ID: "abc-123" }), "<br>\nSession ID: `abc-123`");
   check("session_fragment: unset", sessionFragment({}), "");
@@ -466,34 +458,6 @@ function runSelfCheck() {
     "\n\n***\n\n_Generated by Example Agent via Claude Code._\n"
   );
 
-  const hostFixture = tempFixtureFile("display_name: Example Agent\napp: example-agent\n");
-  let hostResult = readDeclaredHost(hostFixture);
-  check(
-    "read_declared_host: no host: line -> not declared",
-    hostResult.declared ? "declared" : "not-declared",
-    "not-declared"
-  );
-
-  fs.appendFileSync(hostFixture, "host: example\n");
-  hostResult = readDeclaredHost(hostFixture);
-  check(
-    "read_declared_host: declared with value",
-    hostResult.declared ? `declared:${hostResult.value}` : "not-declared",
-    "declared:example"
-  );
-
-  fs.writeFileSync(hostFixture, "display_name: Example Agent\nhost:\n");
-  hostResult = readDeclaredHost(hostFixture);
-  check(
-    "read_declared_host: declared empty",
-    hostResult.declared ? `declared:${hostResult.value}` : "not-declared",
-    "declared:"
-  );
-  fs.rmSync(path.dirname(hostFixture), { recursive: true, force: true });
-
-  check("unfilled template detected", looksLikeUnfilledTemplate("<your GitHub login>") ? "yes" : "no", "yes");
-  check("filled value not flagged", looksLikeUnfilledTemplate("example-agent") ? "yes" : "no", "no");
-
   for (const line of lines) {
     process.stdout.write(`${line}\n`);
   }
@@ -524,29 +488,28 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     return 64;
   }
 
-  const identityFile = env.AGENT_IDENTITY_FILE || path.join(os.homedir(), ".agent-identity");
   const ghBin = env.AGENT_IDENTITY_GH_BIN || "gh";
-  const state = resolve({ runtimeOverride, env, identityFile, ghBin });
+  const state = resolve({ runtimeOverride, env, ghBin });
   // Prefer the shell's logical $PWD (what bash's own guess_bridge_session_id read) over
   // the physical cwd, since a worktree path can be reached through a symlink whose
   // name carries the cse_ id that the resolved physical path does not.
   const ctx = { branch: gitCurrentBranch(), pwd: env.PWD || process.cwd() };
 
   if (mode === "block") {
-    process.stdout.write(printBlock(state, identityFile));
+    process.stdout.write(printBlock(state));
   } else if (mode === "footer") {
-    if (footerAllowed(state.status, state.declaredKind) === 1) {
+    if (footerAllowed(state.status, state.declaredKind, Boolean(state.identity)) === 1) {
       process.stdout.write(printFooter(state, env, ctx));
-    } else if (state.status === 0) {
+    } else if (state.status !== 0) {
+      process.stderr.write(printBlock(state));
+    } else {
       process.stderr.write(
         "REFUSED: kind: human is declared — do not attach an agent footer to a human-authored PR (see this project's AGENTS.md \"## Identity\" section, or your own consuming project's equivalent).\n"
       );
       state.status = 2;
-    } else {
-      process.stderr.write(printBlock(state, identityFile));
     }
   } else if (mode === "check" && state.status !== 0) {
-    process.stderr.write(printBlock(state, identityFile));
+    process.stderr.write(printBlock(state));
   }
 
   return state.status;

@@ -1,10 +1,9 @@
 # Design: an account entry holds an identity block and a credential block, each optional
 
-**Status: planned for v0.1, not yet implemented.** This document describes the target
-schema; the current code (`src/multi-account-token.mjs`, `src/identity.mjs`) still uses
-the older shape described in the rest of this repo's docs (a single top-level App pair,
-and a separate per-`$HOME` `~/.agent-identity` file). See the open issues for the
-concrete work items that will implement this.
+**Status: implemented for v0.1 in `src/multi-account-token.mjs` (validation, per-entry
+minting and verification) and `src/identity.mjs` (identity and footer from the same
+config). The `setup` subcommand that generates commit-author routing from
+`identity.commitName`/`commitEmail` is still to come.**
 
 ## Motivation
 
@@ -84,13 +83,30 @@ break, not a migration path: once this ships, there is no code path that reads a
 per-`$HOME` identity file. An existing host migrates its declared identity into its
 account entries' `identity` blocks once, at cutover.
 
-The identity comparison and footer-rendering logic already moved into `src/identity.mjs`
-(a sibling of `src/multi-account-token.mjs`, not a merge into it — see the issue that
-shipped that port), with `bin/identity.sh` now a thin POSIX-sh shim that keeps its own
-flags (`--footer`, `--check`, `--self-check`) working for existing callers. What lands
-with *this* schema is `src/identity.mjs` reading `identity` blocks from the same
-per-owner config `src/multi-account-token.mjs` resolves accounts from, instead of the
-retired per-`$HOME` file.
+The identity comparison and footer-rendering logic lives in `src/identity.mjs` (a
+sibling of `src/multi-account-token.mjs`, not a merge into it), with `bin/identity.sh` a
+thin POSIX-sh shim that keeps its own flags (`--footer`, `--check`, `--self-check`)
+working for existing callers. `src/identity.mjs` reads `identity` blocks from the same
+per-owner config `src/multi-account-token.mjs` resolves accounts from, through that
+module's own config loader and `resolveAccount`, instead of the retired per-`$HOME` file.
+It resolves the owner like a token does but with the `defaultAccount` fallback disabled.
+
+## How the implementation reads the matrix
+
+- An identity-only entry makes the token command exit 3 with nothing on stdout. The `gh`
+  wrapper treats exactly that code as "run the real `gh` unchanged" and the Git
+  credential helper as "answer nothing"; every other non-zero code still fails closed.
+- Identity commands exit 0 (holds), 1 (declared login differs from the derived one) or 2
+  (refused). Credential-only, absent, unresolvable, and invalid-config owners are all 2
+  with nothing on stdout, for `--check` as well as `--footer`: an owner with no `identity`
+  block has no declared signer to verify, so a pre-push gate refuses it too.
+- A derived login that is not a GitHub App is accepted only when `identity.login` names
+  exactly that login and the entry vouches for it — `kind: human`, or a PAT credential for
+  a machine user. No declaration can bless a login it does not name. The tool cannot tell
+  a machine user from a third party's account by login alone, so "a third party's PAT is
+  refused" is enforced as far as login equality goes (and, for a PAT entry that declares
+  `identity.login`, by `--verify` checking `GET /user` against it); beyond that the
+  declaration is an attestation.
 
 ## What this deliberately does not do
 

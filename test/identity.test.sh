@@ -2,7 +2,7 @@
 # Runnable self-check for identity.sh's derivation path (the mode --self-check
 # does NOT cover). Pins the `gh auth status` regex against captured fixture
 # lines, and drives `--check` end-to-end through AGENT_IDENTITY_GH_BIN with an
-# isolated HOME.
+# isolated HOME and a config whose identity block is the declaration under test.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,13 +59,35 @@ assert_eq "$("$GH_HUMAN" | extract)" "example-user"
 echo "OK: regex pinned against bot and human gh auth status fixtures"
 
 # --- isolated project + HOME for end-to-end --check runs --------------------
+# The project's origin remote is what routes identity to the `example-org` account entry.
 proj="$tmp/proj"
 mkdir -p "$proj"
 git -C "$proj" init -q
 git -C "$proj" config user.email t@example.com
+git -C "$proj" remote add origin https://github.com/example-org/repo.git
 
 fake_home="$tmp/home"
 mkdir -p "$fake_home"
+export IDENTITY_ROUTER_CONFIG="$tmp/config.json"
+
+# write_config <identity-json-or-empty>: the example-org account, always with a credential
+write_config() {
+  local identity=""
+  [ -n "$1" ] && identity=", \"identity\": $1"
+  cat >"$IDENTITY_ROUTER_CONFIG" <<EOF
+{
+  "defaultAccount": "example-org",
+  "accounts": {
+    "example-org": {
+      "accountId": 1,
+      "targetType": "Organization",
+      "credential": { "type": "pat", "tokenPath": "$tmp/unused.token" }$identity
+    }
+  }
+}
+EOF
+  chmod 600 "$IDENTITY_ROUTER_CONFIG"
+}
 
 run_check() {                  # run_check <gh_bin> -> sets OUT, RC; resets stub_calls
   : >"$stub_calls"
@@ -79,50 +101,34 @@ assert_stub_called() {
   [ -s "$stub_calls" ] || fail "expected the stub gh to be consulted, but $stub_calls is empty — --check did not actually go through the fixture"
 }
 
-# --- bot derived, matching declared app -> OK, silent, exit 0 ---------------
-cat >"$fake_home/.agent-identity" <<'EOF'
-display_name: Example Agent
-app:          example-agent
-EOF
+# --- bot derived, matching declared login -> OK, silent, exit 0 -------------
+write_config '{ "login": "example-agent", "displayName": "Example Agent" }'
 run_check "$GH_BOT"
 assert_eq "$RC" 0
 assert_eq "$OUT" ""
 assert_stub_called
 echo "OK: --check silent success, bot derived via gh auth status"
 
-# --- --footer end-to-end: host: field overrides/suppresses hostname -------
+# --- --footer end-to-end: footerHost overrides/suppresses hostname ---------
 footer_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$GH_BOT" "$SCRIPT" --footer)"
 assert_contains "$footer_out" "on \`$(hostname)\`"
-echo "OK: --footer with no host: field uses real hostname"
+echo "OK: --footer with no footerHost uses real hostname"
 
-printf 'host: example\n' >>"$fake_home/.agent-identity"
+write_config '{ "login": "example-agent", "displayName": "Example Agent", "footerHost": "example" }'
 footer_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$GH_BOT" "$SCRIPT" --footer)"
 assert_contains "$footer_out" "on \`example\`"
-echo "OK: --footer with host: example overrides hostname"
+echo "OK: --footer with footerHost: example overrides hostname"
 
-cat >"$fake_home/.agent-identity" <<'EOF'
-display_name: Example Agent
-app:          example-agent
-host:
-EOF
+write_config '{ "login": "example-agent", "displayName": "Example Agent", "footerHost": "" }'
 footer_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$GH_BOT" "$SCRIPT" --footer)"
 case "$footer_out" in
   *' on `'*) fail "expected the host clause to be omitted, got:
 $footer_out" ;;
 esac
-echo "OK: --footer with host: (empty) suppresses the host clause"
+echo "OK: --footer with footerHost: \"\" suppresses the host clause"
 
-# restore the plain fixture the next block expects
-cat >"$fake_home/.agent-identity" <<'EOF'
-display_name: Example Agent
-app:          example-agent
-EOF
-
-# --- bot derived, mismatched declared app -> MISMATCH, names the path -------
-cat >"$fake_home/.agent-identity" <<'EOF'
-display_name: Example Agent Two
-app:          example-agent-two
-EOF
+# --- bot derived, mismatched declared login -> MISMATCH, names the path ------
+write_config '{ "login": "example-agent-two", "displayName": "Example Agent Two" }'
 run_check "$GH_BOT"
 assert_eq "$RC" 1
 assert_contains "$OUT" "MISMATCH"
@@ -141,8 +147,8 @@ assert_contains "$bare_out" "MISMATCH"
 assert_contains "$bare_out" "derived via gh auth status"
 echo "OK: bare identity.sh block also names the derivation path"
 
-# --- human derived via gh, no ~/.agent-identity -> REFUSED, names the path --
-rm -f "$fake_home/.agent-identity"
+# --- human derived via gh, credential-only owner -> REFUSED, names the path --
+write_config ''
 run_check "$GH_HUMAN"
 assert_eq "$RC" 2
 assert_contains "$OUT" "REFUSED"
@@ -160,11 +166,7 @@ assert_contains "$OUT" "derived via git config user.name"
 echo "OK: --check falls back to git config user.name and says so"
 
 # --- kind: human declared and matching -> --check OK, but --footer refuses --
-cat >"$fake_home/.agent-identity" <<'EOF'
-display_name: A Human
-app:          example-user
-kind:         human
-EOF
+write_config '{ "login": "example-user", "displayName": "A Human", "kind": "human" }'
 run_check "$GH_HUMAN"
 assert_eq "$RC" 0
 assert_eq "$OUT" ""
@@ -179,15 +181,14 @@ assert_eq "$footer_rc" 2
 assert_contains "$footer_out" "REFUSED: kind: human is declared"
 echo "OK: --footer refuses to attach an agent footer to a kind: human PR"
 
-# --- unfilled <placeholder> in the identity file is called out, not silently
-# treated as a real declaration ------------------------------------------------
-cat >"$fake_home/.agent-identity" <<'EOF'
-display_name: <your display name>
-app:          <your GitHub login>
-EOF
-block_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$GH_BOT" "$SCRIPT" 2>&1)"
-assert_contains "$block_out" "still has an unfilled <placeholder>"
-echo "OK: bare block warns about an unfilled <placeholder> in the identity file"
+# --- an owner that is not allow-listed gets no identity, not the default's ---
+write_config '{ "login": "example-agent" }'
+git -C "$proj" remote set-url origin https://github.com/outsider/repo.git
+run_check "$GH_BOT"
+assert_eq "$RC" 2
+assert_contains "$OUT" "not allow-listed: outsider"
+echo "OK: --check refuses an owner outside the allow-list instead of using defaultAccount"
+git -C "$proj" remote set-url origin https://github.com/example-org/repo.git
 
 # Note: a pre-push git hook that calls identity.sh --check is not part of
 # this package's snapshot — that's a per-consuming-project integration, wired
