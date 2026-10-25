@@ -89,7 +89,7 @@ breaking change), and two independent, optional blocks — at least one is requi
 - `credential` — how to get a token for this owner. `type: "app"` takes `appId`,
   `privateKeyPath`, and `installationId`; `type: "pat"` takes `tokenPath`. Every entry is
   self-contained: two owners can use two different Apps, and there is no top-level App
-  pair to fall back to.
+  pair to fall back to. An App has one `privateKeyPath`, repeated on each of its entries.
 - `identity` — who the agent is when acting on this owner: `login` (required), and
   optional `displayName`, `footerHost`, `kind` (`agent`, the default, or `human`),
   `commitName`, and `commitEmail`. See [Identity and the PR footer](#identity-and-the-pr-footer).
@@ -146,8 +146,16 @@ machine user). `footerHost` omitted means "use this machine's hostname"; an empt
 omits the host from the footer.
 
 When `multi-account-token` finds an identity-only owner it exits 3 with nothing on
-stdout; the `gh` wrapper then runs the real `gh` unchanged and the Git credential helper
-answers nothing, so the caller's normal credentials apply.
+stdout. The `gh` wrapper then runs the real `gh` unchanged, so `gh` uses its own login.
+The Git credential helper answers nothing, but `install.sh` clears the other github.com
+helpers, so HTTPS Git for an identity-only owner has no credential unless you configure
+another helper after this one.
+
+**The footer follows the owner it resolves, not the pull request's target.** In a fork
+clone (`origin` is your fork, the PR goes to another owner) or with
+`gh pr create --repo other-org/x`, `identity.sh --footer` would use `origin`'s identity
+block. Run it with the same `GH_REPO` the PR is created against, e.g.
+`GH_REPO=other-org/x identity.sh --footer`.
 
 ## PAT-typed accounts
 

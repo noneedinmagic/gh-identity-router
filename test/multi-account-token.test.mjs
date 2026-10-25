@@ -751,6 +751,22 @@ test("mints with the App of the account's own credential block, not a shared one
   assert.equal(JSON.parse(Buffer.from(jwts[0].split(".")[1], "base64url").toString()).iss, "777");
 });
 
+test("validateConfig rejects one App configured with two different key paths", () => {
+  const entry = (installationId, privateKeyPath) => ({
+    accountId: installationId,
+    targetType: "Organization",
+    credential: { type: "app", appId: 100, privateKeyPath, installationId }
+  });
+
+  assert.throws(
+    () => validateConfig({
+      defaultAccount: "example-user",
+      accounts: { "example-user": entry(11, "/keys/a.pem"), "example-org": entry(22, "/keys/copy-of-a.pem") }
+    }),
+    /App 100 has two privateKeyPath values/
+  );
+});
+
 test("verifyInstallations lists and classifies installations once per distinct App", async () => {
   const twoApps = validateConfig({
     defaultAccount: "example-user",

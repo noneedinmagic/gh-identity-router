@@ -56,7 +56,7 @@ function fixture(buildAccounts, { defaultAccount = "default-org", actingLogin = 
   return {
     dir,
     token: (owner) => run(tokenScript, owner ? ["--repo", `${owner}/repo`] : []),
-    footer: (owner) => run(identityScript, ["--footer"], owner ? { GH_REPO: `${owner}/repo` } : {}),
+    footer: (owner, extraEnv = {}) => run(identityScript, ["--footer"], { ...(owner ? { GH_REPO: `${owner}/repo` } : {}), ...extraEnv }),
     check: (owner) => run(identityScript, ["--check"], owner ? { GH_REPO: `${owner}/repo` } : {})
   };
 }
@@ -131,6 +131,7 @@ test("an unresolvable owner routes the token to defaultAccount but never supplie
   const footer = f.footer();
   const check = f.check();
 
+  assert.equal(token.status, 0, token.stderr);
   assert.equal(token.stdout, "github_pat_default-org");
   assert.equal(footer.status, 2);
   assert.equal(footer.stdout, "");
@@ -155,11 +156,7 @@ test("an entry with neither block makes the whole config invalid for both comman
 
 test("a missing config refuses the footer rather than inventing an identity", () => {
   const f = fixture(matrixAccounts);
-  const footer = spawnSync(process.execPath, [identityScript, "--footer"], {
-    cwd: f.dir,
-    env: { ...process.env, HOME: f.dir, IDENTITY_ROUTER_CONFIG: path.join(f.dir, "missing.json"), GH_REPO: "both-org/repo" },
-    encoding: "utf8"
-  });
+  const footer = f.footer("both-org", { IDENTITY_ROUTER_CONFIG: path.join(f.dir, "missing.json") });
 
   assert.equal(footer.status, 2);
   assert.equal(footer.stdout, "");

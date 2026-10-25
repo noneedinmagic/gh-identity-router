@@ -268,7 +268,25 @@ export function validateConfig(config) {
     fail(`Default account is not allow-listed: ${defaultAccount}`);
   }
 
-  const hasAppAccount = Object.values(accounts).some((entry) => entry.credential?.type === "app");
+  // An installation belongs to an App, not to a key file, so --verify lists per appId;
+  // one App under two key paths would make the second group's installations "unexpected".
+  const keyPathByApp = new Map();
+
+  for (const [name, { credential }] of Object.entries(accounts)) {
+    if (credential?.type !== "app") {
+      continue;
+    }
+
+    const known = keyPathByApp.get(credential.appId);
+
+    if (known !== undefined && known !== credential.privateKeyPath) {
+      fail(`App ${credential.appId} has two privateKeyPath values (${known}, and ${credential.privateKeyPath} on ${name}); use one path per App`);
+    }
+
+    keyPathByApp.set(credential.appId, credential.privateKeyPath);
+  }
+
+  const hasAppAccount = keyPathByApp.size > 0;
 
   if (hasAppAccount && accounts[defaultAccount].credential?.type === "pat") {
     fail(`Default account must be app-typed while the config also has an app-typed account: ${defaultAccount}`);
@@ -581,8 +599,8 @@ export async function listAppInstallations({
 }
 
 // Each App entry carries its own appId/privateKeyPath, so installations are listed and
-// classified once per distinct App — an installation only means something against the
-// App that owns it.
+// classified once per distinct appId (validateConfig guarantees one key path per App) —
+// an installation only means something against the App that owns it.
 export async function verifyInstallations({
   config,
   fetchImpl = fetch,
@@ -595,9 +613,8 @@ export async function verifyInstallations({
   for (const [name, entry] of Object.entries(config.accounts)) {
     if (entry.credential?.type === "app") {
       const { appId, privateKeyPath } = entry.credential;
-      const key = `${appId}\0${privateKeyPath}`;
 
-      appGroups.set(key, { appId, privateKeyPath, accounts: { ...appGroups.get(key)?.accounts, [name]: entry } });
+      appGroups.set(appId, { appId, privateKeyPath, accounts: { ...appGroups.get(appId)?.accounts, [name]: entry } });
     } else if (entry.credential?.type === "pat") {
       patAccounts.push([name, entry]);
     }
