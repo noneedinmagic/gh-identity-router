@@ -15,6 +15,13 @@
 > `sed -i 's#/gh-multi-account/#/gh-identity-router/#g' ~/.config/gh-identity-router/config.json`.
 > Then re-run `./install.sh`; remove the stale `~/.local/bin/multi-account-git-credential`
 > by hand.
+>
+> The account entry schema also changed: App/PAT settings now live in a per-entry
+> `credential` block (no top-level `appId`/`privateKeyPath`, no flat `type`,
+> `installationId`, or `tokenPath`), and the per-`$HOME` `~/.agent-identity` file is
+> retired in favor of an optional per-entry `identity` block. A config in the old shape
+> is rejected with a message naming what to move. See [Configuration](#configuration)
+> and `config.example.json`.
 
 Any coding-agent identity can be backed by its own GitHub App, with a distinct
 installation on each GitHub account it needs to act on. Each installation has its own
@@ -68,23 +75,40 @@ agent context at all, give it its own OS user, not just its own account entry.
 
 ## Configuration
 
-A legacy single-installation config already contains the App ID and private-key path.
-Use it to discover every installation without minting or printing a token:
-
-```bash
-IDENTITY_ROUTER_CONFIG=~/.config/gh-identity-router/config-alt.json \
-  ./src/multi-account-token.mjs --discover-installations
-```
-
-The command prints login, numeric account and installation IDs, target type,
-repository selection, and active/suspended state. Copy `config.example.json` to:
+Copy `config.example.json` to:
 
 ```text
 ~/.config/gh-identity-router/config.json
 ```
 
-Populate it with the discovered IDs. Reuse the existing private-key path; do not copy
-the key. `your-user` is a `User`; `your-org` is an `Organization`. Keep account keys
+Each `accounts.<owner>` entry (keys are lowercase GitHub logins) has `accountId`,
+`targetType` (`User` or `Organization`), an optional `host` (only `github.com` is
+supported; the field exists so GitHub Enterprise Server can be added later without a
+breaking change), and two independent, optional blocks — at least one is required:
+
+- `credential` — how to get a token for this owner. `type: "app"` takes `appId`,
+  `privateKeyPath`, and `installationId`; `type: "pat"` takes `tokenPath`. Every entry is
+  self-contained: two owners can use two different Apps, and there is no top-level App
+  pair to fall back to.
+- `identity` — who the agent is when acting on this owner: `login` (required), and
+  optional `displayName`, `footerHost`, `kind` (`agent`, the default, or `human`),
+  `commitName`, and `commitEmail`. See [Identity and the PR footer](#identity-and-the-pr-footer).
+
+`defaultAccount` names the entry used for **token routing only**, when no owner can be
+resolved for a `gh` call. It never supplies an identity.
+
+To find the installation IDs for an App, run discovery against a small bootstrap config
+that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
+the flat pair is still read, since discovery runs before any account entry exists:
+
+```bash
+IDENTITY_ROUTER_CONFIG=~/.config/gh-identity-router/bootstrap.json \
+  ./src/multi-account-token.mjs --discover-installations
+```
+
+The command prints login, numeric account and installation IDs, target type,
+repository selection, and active/suspended state, without minting or printing a token.
+Populate each entry's `credential` block with the discovered IDs. Keep account keys
 lowercase and set private permissions on both config and key files:
 
 ```bash
@@ -95,13 +119,41 @@ chmod 600 /path/from/privateKeyPath
 No access token is stored in this file. The helper creates a new installation token
 for each command.
 
+## Identity and the PR footer
+
+`identity.sh` compares the `identity.login` an owner declares against the login that
+actually authenticates `gh` (`gh auth status`, falling back to `git config user.name`),
+and renders the PR footer from the same block. The owner is resolved like a token's, from
+`GH_REPO`, then the current repository's `origin`, then `IDENTITY_ROUTER_ORG` — but never
+`defaultAccount`.
+
+| `credential` | `identity` | Token minted? | Footer printed? |
+|---|---|---|---|
+| yes | yes | yes | yes |
+| yes | no | yes | no (exit 2) |
+| no | yes | no (exit 3; `gh` and Git use their own credential) | yes, if the derived login matches `identity.login` |
+| no | no | — | — (the config is invalid) |
+
+An owner that is absent from `accounts`, or cannot be resolved at all, gets no token and
+no footer. `identity.sh` exits 0 when the declaration holds, 1 on a login mismatch, and 2
+when it refuses (no identity applies, or the derived login is a person's account the
+declaration doesn't vouch for). Nothing is printed to stdout on a refusal.
+
+A login that is not a GitHub App (`name[bot]`) is accepted only when `identity.login`
+names exactly that login **and** either `kind` is `human` (the machine's owner acting
+directly — never given an agent footer) or the entry's credential is a PAT (a purpose-made
+machine user). `footerHost` omitted means "use this machine's hostname"; an empty string
+omits the host from the footer.
+
+When `multi-account-token` finds an identity-only owner it exits 3 with nothing on
+stdout; the `gh` wrapper then runs the real `gh` unchanged and the Git credential helper
+answers nothing, so the caller's normal credentials apply.
+
 ## PAT-typed accounts
 
 An account entry can be backed by a fine-grained personal access token instead of a
-GitHub App installation — set `"type": "pat"` and a `tokenPath` instead of
-`installationId`, as `contractor-org` does in `config.example.json`. An entry with no
-`type` field is treated as App-typed for backward compatibility; a new PAT entry
-should always set `"type": "pat"` explicitly.
+GitHub App installation — give its `credential` block `"type": "pat"` and a `tokenPath`,
+as `contractor-org` does in `config.example.json`.
 
 - **Fine-grained only.** Classic PATs are not supported: one classic token can span
   every organization its underlying user can reach, which has no single account entry
@@ -117,17 +169,26 @@ should always set `"type": "pat"` explicitly.
   install -m 600 /dev/stdin ~/.config/gh-identity-router/tokens/contractor-org.token <<<"github_pat_..."
   ```
 
-- **`defaultAccount` must stay App-typed whenever the config also has an App-typed
-  account.** A PAT-typed default is only allowed in a config with no App entries at
-  all (a pure-PAT host). This bounds the damage of an unresolved selector that falls
+- **`defaultAccount` must not hold a PAT credential whenever the config also has an
+  App-typed account.** A PAT default is only allowed in a config with no App entries at
+  all (a pure-PAT host); an identity-only default mints nothing and is always fine. This bounds the damage of an unresolved selector that falls
   through to the default: a wrong-owner App token is dead within the hour, while a
   wrong-owner PAT default is a long-lived static secret that a misconfigured
   `credential.helper` can persist in plaintext.
-- **One owner, one credential.** An owner cannot hold both an App and a PAT entry.
+- **One owner, one credential.** An entry has a single `credential` block, so an owner
+  cannot hold both an App and a PAT.
+- **A PAT acts as whoever owns it, and that must be a machine user.** A fine-grained
+  PAT's acting login is the account that created it, independent of the owner it is
+  scoped to. Declare that login as the entry's `identity.login`; `--verify` then checks
+  `GET /user` against it. Use a purpose-made machine user, never a third party's token:
+  it would attribute commits and comments to a real person who did not write them. The
+  tool cannot tell a machine user from someone else's account by login alone, so this is
+  a rule the declaration attests to, not one it can prove.
 - **`--verify` for a PAT entry is weaker than for an App entry, and cannot prove
   scope.** It checks that `tokenPath` is 0600, that the token is live
   (`GET /rate_limit` returns 200), and that the configured `accountId`/`targetType`
-  match the real owner. It cannot prove the token is actually *scoped* to that
+  match the real owner (and, if the entry declares an `identity`, that the token acts
+  as `identity.login`). It cannot prove the token is actually *scoped* to that
   owner — fine-grained PATs carry implicit public read, so a PAT filed under the
   wrong owner verifies clean and only fails at use time (a 404).
 - **Fine-grained PATs expire silently.** GitHub's default organization policy caps
