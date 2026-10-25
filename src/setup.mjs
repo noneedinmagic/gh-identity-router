@@ -188,8 +188,9 @@ function bakedNode(launcherPath) {
 
 // Returns null when the first `gh` on PATH is the installed wrapper, else why not.
 export function checkGhOnPath(wrapper, pathVar = process.env.PATH ?? "") {
-  for (const dir of pathVar.split(path.delimiter).filter(Boolean)) {
-    const candidate = path.join(dir, "gh");
+  for (const dir of pathVar.split(path.delimiter)) {
+    // The shell treats an empty PATH component as the current directory.
+    const candidate = path.join(dir || ".", "gh");
 
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
@@ -202,7 +203,7 @@ export function checkGhOnPath(wrapper, pathVar = process.env.PATH ?? "") {
 
     return fs.realpathSync(candidate) === fs.realpathSync(wrapper)
       ? null
-      : `\`gh\` on PATH resolves to ${candidate}, not the installed wrapper ${wrapper}; put ${path.dirname(wrapper)} before ${dir} in PATH`;
+      : `\`gh\` on PATH resolves to ${candidate}, not the installed wrapper ${wrapper}; put ${path.dirname(wrapper)} before ${path.dirname(candidate)} in PATH`;
   }
 
   return `no \`gh\` on PATH; add ${path.dirname(wrapper)} to PATH`;
@@ -319,6 +320,18 @@ function resolveBackupDir(l, selected) {
   return resolved;
 }
 
+function sameDir(a, b) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+
+  return a === b || real(a) === real(b);
+}
+
 function restoreBackup(l, selected) {
   const dir = resolveBackupDir(l, selected);
   const manifestPath = path.join(dir, "manifest.version");
@@ -330,7 +343,7 @@ function restoreBackup(l, selected) {
 
   const homePath = path.join(dir, "home.path");
 
-  if (!exists(homePath) || fs.readFileSync(homePath, "utf8").trim() !== l.home) {
+  if (!exists(homePath) || !sameDir(fs.readFileSync(homePath, "utf8").trim(), l.home)) {
     fail(`Backup belongs to a different HOME: ${dir}`);
   }
 
