@@ -387,6 +387,64 @@ function restoreBackup(l, selected) {
 
 // ---- commands ----------------------------------------------------------------
 
+// The entry existing is not enough: an older Git ignores hasconfig:, and a [user]
+// section placed below the include overrides it. Ask Git what a clone would get.
+function probeIncludes(includes, throwOnFail = true) {
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), "gh-identity-router-probe-"));
+
+  try {
+    git(["init", "-q", probe]);
+    for (const { owner, name } of includes) {
+      git(["-C", probe, "remote", "remove", "origin"], [0, 2]);
+      git(["-C", probe, "remote", "add", "origin", `https://github.com/${owner}/probe`]);
+      if (git(["-C", probe, "config", "user.name"], [0, 1]).trim() !== name) {
+        const message = `Git does not apply the commit author for ${owner}; needs Git 2.36+ and the include below any [user] section`;
+
+        if (throwOnFail) {
+          fail(message);
+        }
+        return message;
+      }
+    }
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+
+  return null;
+}
+
+// Serializes concurrent setups so the baseline-backup pointer is only written by the run
+// whose backup captured the true pre-install state. A dead holder's lock is reclaimed.
+function lockSetup(l) {
+  const lock = path.join(l.state, "setup.lock");
+
+  fs.mkdirSync(l.state, { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      fs.writeFileSync(lock, `${process.pid}\n`, { flag: "wx" });
+      return () => fs.rmSync(lock, { force: true });
+    } catch (error) {
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
+      const pid = Number.parseInt(fs.readFileSync(lock, "utf8"), 10);
+      let alive = true;
+
+      try {
+        process.kill(pid, 0);
+      } catch (killError) {
+        alive = killError.code === "EPERM";
+      }
+      if (alive) {
+        fail(`Another setup is running (pid ${pid}); retry when it finishes or remove ${lock}`);
+      }
+      fs.rmSync(lock, { force: true });
+    }
+  }
+
+  return fail(`Could not acquire ${lock}`);
+}
+
 function liveVerify(command, args, configPath) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
@@ -439,9 +497,11 @@ function setup({ dryRun, verify, node }) {
     liveVerify(nodePath, [path.join(PKG_DIR, "src", "multi-account-token.mjs"), "--verify"], configPath);
   }
 
-  const backupDir = createBackup(l);
+  const release = lockSetup(l);
+  let backupDir;
 
   try {
+    backupDir = createBackup(l);
     for (const target of targets(l)) {
       if (target.src) {
         installFile(target.path, target.mode, { from: path.join(PKG_DIR, target.src) });
@@ -457,21 +517,30 @@ function setup({ dryRun, verify, node }) {
     gitGlobal([GIT_KEYS.username, "x-access-token"]);
     gitGlobal([GIT_KEYS["use-http-path"], "true"]);
     applyIncludes(l, includes);
+    probeIncludes(includes);
 
     liveVerify(verifyCommand ?? launcher, ["--verify"], configPath);
   } catch (error) {
     process.stderr.write("Installation failed; restoring previous credential state.\n");
     try {
-      restoreBackup(l, backupDir);
+      if (backupDir) {
+        restoreBackup(l, backupDir);
+      }
     } catch (restoreError) {
       process.stderr.write(`Automatic restore failed (${restoreError.message}); use: gh-identity-router uninstall --backup ${backupDir}\n`);
     }
+    release();
     throw error;
   }
 
   // Only the first setup's backup is the pre-install state `uninstall` should return to.
-  if (!exists(baselinePointer) || !exists(fs.readFileSync(baselinePointer, "utf8").trim())) {
-    fs.writeFileSync(baselinePointer, `${backupDir}\n`);
+  // Still under the lock, so a concurrent setup cannot capture our mutated state as baseline.
+  try {
+    if (!exists(baselinePointer) || !exists(fs.readFileSync(baselinePointer, "utf8").trim())) {
+      fs.writeFileSync(baselinePointer, `${backupDir}\n`);
+    }
+  } finally {
+    release();
   }
 
   console.log("Installed gh-identity-router helpers.");
@@ -538,24 +607,7 @@ function verifyInstall({ l, launcher, configPath, verifyCommand, includes }) {
       return `missing or out of date for ${stale.map((s) => s.owner).join(", ")} (re-run setup)`;
     }
 
-    // The entry existing is not enough: an older Git ignores hasconfig:, and a [user]
-    // section placed below the include overrides it. Ask Git what a clone would get.
-    const probe = fs.mkdtempSync(path.join(os.tmpdir(), "gh-identity-router-probe-"));
-
-    try {
-      git(["init", "-q", probe]);
-      for (const { owner, name } of includes) {
-        git(["-C", probe, "remote", "remove", "origin"], [0, 2]);
-        git(["-C", probe, "remote", "add", "origin", `https://github.com/${owner}/probe`]);
-        if (git(["-C", probe, "config", "user.name"], [0, 1]).trim() !== name) {
-          return `Git does not apply the commit author for ${owner}; needs Git 2.36+ and the include below any [user] section`;
-        }
-      }
-    } finally {
-      fs.rmSync(probe, { recursive: true, force: true });
-    }
-
-    return null;
+    return probeIncludes(includes, false);
   });
   check("live credential verification", () => liveVerify(verifyCommand ?? launcher, ["--verify"], configPath));
 
