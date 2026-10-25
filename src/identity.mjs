@@ -215,7 +215,9 @@ export function resolve({ runtimeOverride = "", env = process.env, ghBin } = {})
     crossCheckWarning = `warning: gh account (${derived}) differs from git config user.name (${gitUser}) — commits and the push may be attributed to different identities.`;
   }
 
-  const status = account
+  // No identity block means no declared signer: refuse before decideStatus, which would
+  // accept any bot-shaped login against an empty declaration.
+  const status = account && identity
     ? decideStatus(derivedRaw, identity?.login ?? "", identity?.kind ?? "", account.credential?.type)
     : 2;
 
@@ -244,7 +246,7 @@ export function printBlock(state) {
   if (state.identity) {
     lines.push(`declared: ${state.declaredLogin}  (${state.declaredName || state.declaredLogin})`);
   } else if (state.owner) {
-    lines.push(`declared: (none — status UNVERIFIED, no identity block for ${state.owner})`);
+    lines.push(`declared: (none — REFUSED, no identity block for ${state.owner})`);
   } else {
     lines.push("declared: (none — no owner resolved)");
   }
@@ -266,11 +268,11 @@ export function printBlock(state) {
   if (!state.owner) {
     lines.push(`REFUSED: no identity applies — ${state.refusal}`);
   } else if (state.status === 0) {
-    lines.push(state.identity ? "OK" : `UNVERIFIED (no identity block for ${state.owner} — derived identity used as-is)`);
+    lines.push("OK");
   } else if (state.status === 1) {
     lines.push(`MISMATCH: declared login '${state.declaredLogin}' != derived '${state.derived}' (derived via ${state.derivedSource})`);
   } else {
-    lines.push(`REFUSED: derived credential '${state.derivedRaw}' (derived via ${state.derivedSource}) is a human account and ${state.identity ? `is not explicitly declared as kind: human or a PAT credential for ${state.owner}` : `${state.owner} declares no identity block`}`);
+    lines.push(`REFUSED: derived credential '${state.derivedRaw}' (derived via ${state.derivedSource}) ${state.identity ? `is a human account and is not explicitly declared as kind: human or a PAT credential for ${state.owner}` : `cannot be verified: ${state.owner} has no identity block, so no signer is declared`}`);
   }
 
   return `${lines.join("\n")}\n`;

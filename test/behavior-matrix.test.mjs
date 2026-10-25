@@ -91,6 +91,14 @@ test("credential only: a token is minted, the footer is refused with nothing on 
   assert.match(footer.stderr, /cred-org has no identity block/);
 });
 
+test("credential only: --check refuses even when the derived login is bot-shaped, since no signer is declared", () => {
+  const f = fixture(matrixAccounts, { actingLogin: "example-agent[bot]" });
+  const check = f.check("cred-org");
+
+  assert.equal(check.status, 2);
+  assert.match(check.stderr, /cred-org has no identity block/);
+});
+
 test("identity only: nothing is minted (exit 3, empty stdout) and the footer prints when gh matches identity.login", () => {
   const f = fixture(matrixAccounts);
   const token = f.token("ident-org");

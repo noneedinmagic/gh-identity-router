@@ -141,8 +141,8 @@ and renders the PR footer from the same block. The owner is resolved like a toke
 
 An owner that is absent from `accounts`, or cannot be resolved at all, gets no token and
 no footer. `identity.sh` exits 0 when the declaration holds, 1 on a login mismatch, and 2
-when it refuses (no identity applies, or the derived login is a person's account the
-declaration doesn't vouch for). Nothing is printed to stdout on a refusal.
+when it refuses (no identity applies, the owner has no `identity` block so no signer is
+declared, or the derived login is a person's account the declaration doesn't vouch for). Nothing is printed to stdout on a refusal.
 
 A login that is not a GitHub App (`name[bot]`) is accepted only when `identity.login`
 names exactly that login **and** either `kind` is `human` (the machine's owner acting
