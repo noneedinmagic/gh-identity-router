@@ -16,7 +16,7 @@ args=("$@")
 for ((index = 0; index < ${#args[@]}; index += 1)); do
   case "${args[$index]}" in
     -R|--repo)
-      if ((index + 1 >= ${#args[@]})); then
+      if ((index + 1 >= ${#args[@]})) || [[ -z "${args[$((index + 1))]}" ]]; then
         echo "Missing value for ${args[$index]}" >&2
         exit 2
       fi
@@ -25,6 +25,10 @@ for ((index = 0; index < ${#args[@]}; index += 1)); do
       ;;
     --repo=*)
       repo="${args[$index]#--repo=}"
+      if [[ -z "$repo" ]]; then
+        echo "Missing value for --repo" >&2
+        exit 2
+      fi
       break
       ;;
   esac
