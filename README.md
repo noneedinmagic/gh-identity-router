@@ -321,6 +321,9 @@ section only) and adds this to `~/.gitconfig`, after your existing `[user]` sect
     path = ~/.local/share/gh-identity-router/git/<owner>.gitconfig
 ```
 
+plus the same `path` under `git@github.com:<owner>/**` and `ssh://git@github.com/<owner>/**`,
+so a clone's author does not depend on its transport.
+
 Re-running `setup` rewrites its own entries; `uninstall` removes them. Includes that
 point anywhere else are never touched. To do it by hand instead, put the same two
 pieces in place yourself, keeping the `includeIf` below the global `[user]` section:
@@ -336,8 +339,8 @@ this prevents. Checked on Git 2.53 against the pattern above, each of these fell
 - different case in the owner (`https://github.com/<Org>/repo`) — the match is
   case-sensitive even though GitHub URLs aren't;
 - a username in the URL (`https://user@github.com/<org>/repo`);
-- an SSH remote (`git@github.com:<org>/repo.git`) — not used here anyway (HTTPS only,
-  see above).
+- any other spelling than the three `setup` writes (for example
+  `ssh://github.com/<org>/repo` with no user part).
 
 The opposite mistake is silent too: `hasconfig:remote.*.url` matches *any* configured
 remote, not just `origin`. A home-org clone with `origin` pointing home but a second
@@ -420,10 +423,12 @@ gh-identity-router uninstall
 ```
 
 restores the state from before the **first** `setup` (so running `setup` twice and then
-`uninstall` still undoes everything): the prior files at every installed path, the exact
+`uninstall` still undoes everything, and so does one after a `setup` that was killed
+midway): the prior files at every installed path, the exact
 prior values (including absent and empty Git settings) for
 `credential.https://github.com.{helper,username,useHttpPath}`, and the prior commit-author
-includes. It removes the generated fragments. (If you installed with the old `install.sh`,
+includes. It removes the generated fragments. `uninstall --backup DIR` with a *later*
+backup restores that backup but keeps the first-setup baseline for the next plain `uninstall`. (If you installed with the old `install.sh`,
 the first `setup` records *that* install as its baseline; to get back to the state before
 it, run `uninstall --backup` with your oldest backup under
 `~/.local/state/gh-identity-router/backups/`.) `uninstall --backup DIR` restores a specific

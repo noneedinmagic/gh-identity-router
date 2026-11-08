@@ -557,6 +557,8 @@ test("installer automatically restores state after post-install verification fai
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /restoring previous credential state/);
+  // Rolled back to nothing installed, so there is no baseline left to point at.
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "state", "gh-identity-router", "baseline-backup")), false);
   assert.equal(fs.readFileSync(oldGh, "utf8"), "#!/usr/bin/env bash\necho old-gh\n");
   assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "multi-account-token")), false);
   assert.deepEqual(
@@ -661,11 +663,11 @@ test("setup --verify passes only when the first gh on PATH is the installed wrap
 
 test("setup generates a commit-author includeIf fragment that Git actually applies", () => {
   const fixture = installerFixture("multi-account-setup-include-");
-  const clone = (owner) => {
+  const clone = (owner, remote = `https://github.com/${owner}/repo`) => {
     const dir = fs.mkdtempSync(path.join(fixture.home, `${owner}-`));
 
     git(fixture.home, dir, "init", "-q");
-    git(fixture.home, dir, "remote", "add", "origin", `https://github.com/${owner}/repo`);
+    git(fixture.home, dir, "remote", "add", "origin", remote);
     return dir;
   };
 
@@ -674,8 +676,13 @@ test("setup generates a commit-author includeIf fragment that Git actually appli
   git(fixture.home, fixture.home, "config", "--global", "user.email", "home@example.com");
   execFileSync(cli, ["setup"], { env: fixture.env });
 
-  const author = (owner, key) => git(fixture.home, clone(owner), "config", key);
+  const author = (owner, key, remote = `https://github.com/${owner}/repo`) =>
+    git(fixture.home, clone(owner, remote), "config", key);
   assert.equal(author("example-org", "user.name").stdout.trim(), "example-bot[bot]");
+  // The same author applies whichever transport the clone uses.
+  for (const remote of ["git@github.com:example-org/repo.git", "ssh://git@github.com/example-org/repo"]) {
+    assert.equal(author("example-org", "user.name", remote).stdout.trim(), "example-bot[bot]", remote);
+  }
   assert.equal(author("example-org", "user.email").stdout.trim(), "1+example-bot[bot]@users.noreply.github.com");
   // An owner without commit fields gets no include and keeps the home identity.
   assert.equal(author("plain-org", "user.name").stdout.trim(), "home-agent");
@@ -802,4 +809,50 @@ test("a failed re-setup rolls the commit-author includes back to the previous se
   assert.equal(result.status, 1);
   assert.deepEqual(gitConfigValues(fixture.home, key), [fragment]);
   assert.match(fs.readFileSync(fragment, "utf8"), /example-bot\[bot\]/);
+});
+
+test("uninstall still works after a setup that was killed midway", () => {
+  const fixture = installerFixture("multi-account-setup-killed-");
+  const oldGh = path.join(fixture.home, ".local", "bin", "gh");
+  const counter = path.join(fixture.home, "verify-count");
+
+  fs.mkdirSync(path.dirname(oldGh), { recursive: true });
+  executable(oldGh, "#!/bin/sh\necho old-gh\n");
+  // 1st call (pre-install check) passes; the 2nd, after files are installed, kills setup.
+  executable(
+    fixture.verifyCommand,
+    `#!/bin/sh\nprintf x >>"${counter}"\n[ "$(wc -c <"${counter}")" -lt 2 ] || { kill -9 $PPID; sleep 5; }\n`
+  );
+
+  const killed = runCli(["setup"], fixture.env);
+  assert.equal(killed.status, null, "setup should have died from the signal");
+  assert.notEqual(fs.readFileSync(oldGh, "utf8"), "#!/bin/sh\necho old-gh\n", "control: the install had started");
+
+  // The dead run's lock is reclaimed, and its backup is the recorded baseline.
+  const result = runCli(["uninstall"], fixture.env);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(oldGh, "utf8"), "#!/bin/sh\necho old-gh\n");
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "multi-account-token")), false);
+});
+
+test("uninstall --backup with a later backup keeps the first-setup baseline", () => {
+  const fixture = installerFixture("multi-account-uninstall-later-");
+  const oldGh = path.join(fixture.home, ".local", "bin", "gh");
+
+  fs.mkdirSync(path.dirname(oldGh), { recursive: true });
+  executable(oldGh, "#!/bin/sh\necho old-gh\n");
+
+  execFileSync(cli, ["setup"], { env: fixture.env });
+  const second = backupPathFrom(execFileSync(cli, ["setup"], { encoding: "utf8", env: fixture.env }));
+
+  // Back to the first setup's installed state; that is not the end of the install.
+  assert.equal(runCli(["uninstall", "--backup", second], fixture.env).status, 0);
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "multi-account-token")), true);
+
+  const result = runCli(["uninstall"], fixture.env);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(oldGh, "utf8"), "#!/bin/sh\necho old-gh\n");
+  assert.equal(fs.existsSync(path.join(fixture.home, ".local", "bin", "multi-account-token")), false);
 });

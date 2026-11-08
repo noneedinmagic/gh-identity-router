@@ -211,7 +211,14 @@ export function checkGhOnPath(wrapper, pathVar = process.env.PATH ?? "") {
 
 // ---- per-owner commit-author includeIf ------------------------------------------
 
-const includeKey = (owner) => `includeIf.hasconfig:remote.*.url:https://github.com/${owner}/**.path`;
+// Remote URL spellings of one owner. The same fragment is included for each, so the
+// commit author does not depend on which transport a clone happens to use.
+const remotePatterns = (owner) => [
+  `https://github.com/${owner}/**`,
+  `git@github.com:${owner}/**`,
+  `ssh://git@github.com/${owner}/**`
+];
+const includeKeys = (owner) => remotePatterns(owner).map((pattern) => `includeIf.hasconfig:remote.*.url:${pattern}.path`);
 
 // ponytail: Git matches the remote URL case-sensitively but config owner keys are
 // lowercased, so a clone whose remote spells the owner differently silently falls back
@@ -266,7 +273,9 @@ function applyIncludes(l, plan) {
     // `git config --file` does the quoting; a name is never spliced into config text.
     git(["config", "--file", fragment, "user.name", name]);
     git(["config", "--file", fragment, "user.email", email]);
-    gitGlobal(["--add", includeKey(owner), fragment]);
+    for (const key of includeKeys(owner)) {
+      gitGlobal(["--add", key, fragment]);
+    }
   }
 }
 
@@ -408,10 +417,14 @@ function probeIncludes(includes, throwOnFail = true) {
   try {
     git(["init", "-q", probe]);
     for (const { owner, name } of includes) {
-      git(["-C", probe, "remote", "remove", "origin"], [0, 2]);
-      git(["-C", probe, "remote", "add", "origin", `https://github.com/${owner}/probe`]);
-      if (git(["-C", probe, "config", "user.name"], [0, 1]).trim() !== name) {
-        const message = `Git does not apply the commit author for ${owner}; needs Git 2.36+ and the include below any [user] section`;
+      for (const url of [`https://github.com/${owner}/probe`, `git@github.com:${owner}/probe.git`, `ssh://git@github.com/${owner}/probe`]) {
+        git(["-C", probe, "remote", "remove", "origin"], [0, 2]);
+        git(["-C", probe, "remote", "add", "origin", url]);
+        if (git(["-C", probe, "config", "user.name"], [0, 1]).trim() === name) {
+          continue;
+        }
+
+        const message = `Git does not apply the commit author for ${owner} (remote ${url}); needs Git 2.36+ and the include below any [user] section`;
 
         if (throwOnFail) {
           fail(message);
@@ -512,9 +525,18 @@ function setup({ dryRun, verify, node }) {
 
   const release = lockSetup(l);
   let backupDir;
+  let wrotePointer = false;
 
   try {
     backupDir = createBackup(l);
+    // Recorded before any change, still under the lock, so a setup that dies midway
+    // leaves `uninstall` something to restore, and a concurrent setup cannot capture
+    // our mutated state as the baseline. Only the first setup's backup is the true
+    // pre-install state, so an existing, still-present pointer is kept.
+    if (!exists(baselinePointer) || !exists(fs.readFileSync(baselinePointer, "utf8").trim())) {
+      fs.writeFileSync(baselinePointer, `${backupDir}\n`);
+      wrotePointer = true;
+    }
     for (const target of targets(l)) {
       if (target.src) {
         installFile(target.path, target.mode, { from: path.join(PKG_DIR, target.src) });
@@ -539,6 +561,10 @@ function setup({ dryRun, verify, node }) {
       if (backupDir) {
         restoreBackup(l, backupDir);
       }
+      // Restored: nothing is installed, so there is no baseline to keep.
+      if (wrotePointer) {
+        fs.rmSync(baselinePointer, { force: true });
+      }
     } catch (restoreError) {
       process.stderr.write(`Automatic restore failed (${restoreError.message}); use: gh-identity-router uninstall --backup ${backupDir}\n`);
     }
@@ -546,15 +572,7 @@ function setup({ dryRun, verify, node }) {
     throw error;
   }
 
-  // Only the first setup's backup is the pre-install state `uninstall` should return to.
-  // Still under the lock, so a concurrent setup cannot capture our mutated state as baseline.
-  try {
-    if (!exists(baselinePointer) || !exists(fs.readFileSync(baselinePointer, "utf8").trim())) {
-      fs.writeFileSync(baselinePointer, `${backupDir}\n`);
-    }
-  } finally {
-    release();
-  }
+  release();
 
   console.log("Installed gh-identity-router helpers.");
   console.log(`Existing files and Git credential settings were backed up to: ${backupDir}`);
@@ -608,10 +626,10 @@ function verifyInstall({ l, launcher, configPath, verifyCommand, includes }) {
   check("commit-author includes", () => {
     const managed = managedIncludes(l);
     const stale = includes.filter(({ owner, name, email, fragment }) => {
-      const wanted = includeKey(owner).toLowerCase();
+      const wanted = includeKeys(owner).map((key) => key.toLowerCase());
       const live = ["user.name", "user.email"].map((key) => git(["config", "--file", fragment, "--get", key], [0, 1, 128]).trim());
 
-      return !managed.some((e) => e.value === fragment && e.key.toLowerCase() === wanted)
+      return !wanted.every((key) => managed.some((e) => e.value === fragment && e.key.toLowerCase() === key))
         || live[0] !== name
         || live[1] !== email;
     });
@@ -639,8 +657,16 @@ function uninstall({ backup }) {
     const dir = backup
       ?? (exists(baselinePointer) ? fs.readFileSync(baselinePointer, "utf8").trim() : fail("No recorded setup to undo; pass --backup DIR"));
 
-    console.log(`Restored gh-identity-router state from: ${restoreBackup(l, dir)}`);
-    fs.rmSync(baselinePointer, { force: true });
+    const restored = restoreBackup(l, dir);
+
+    console.log(`Restored gh-identity-router state from: ${restored}`);
+    // Only restoring the baseline itself ends the install; a later backup leaves the
+    // first setup's baseline in place for the next plain `uninstall`.
+    const baseline = exists(baselinePointer) ? fs.readFileSync(baselinePointer, "utf8").trim() : null;
+
+    if (baseline && exists(baseline) && fs.realpathSync(baseline) === restored) {
+      fs.rmSync(baselinePointer, { force: true });
+    }
   } finally {
     release();
   }
