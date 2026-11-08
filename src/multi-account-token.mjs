@@ -347,9 +347,11 @@ function resolveOwnerSelector(rawValue, label) {
   return owner;
 }
 
-export function resolveAccount(config, selectors = {}, { allowDefault = true } = {}) {
+// repositoryLabel names the repository selector in errors: callers that did not receive it
+// as `--repo` (identity.mjs reads GH_REPO) pass what the user actually set.
+export function resolveAccount(config, selectors = {}, { allowDefault = true, repositoryLabel = "--repo" } = {}) {
   const explicitAccount = selectors.account ? normalizeAccount(selectors.account) : null;
-  const repositoryOwner = resolveOwnerSelector(selectors.repository, "--repo");
+  const repositoryOwner = resolveOwnerSelector(selectors.repository, repositoryLabel);
   const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL");
   const environmentAccount = selectors.environmentAccount
     ? normalizeAccount(selectors.environmentAccount)

@@ -184,7 +184,7 @@ export function resolveIdentityAccount(env = process.env) {
         remoteUrl: env.GH_REPO ? undefined : gitOriginUrl(),
         environmentAccount: env.IDENTITY_ROUTER_ORG
       },
-      { allowDefault: false }
+      { allowDefault: false, repositoryLabel: "GH_REPO" }
     );
 
     return { account, refusal: "" };
