@@ -88,6 +88,17 @@ function targets(l) {
   ];
 }
 
+/**
+ * Whether a filesystem entry exists at `p`, without following symlinks.
+ *
+ * Unlike `fs.existsSync`, a dangling symlink counts as present (`existsSync`
+ * follows the link and reports false). Backup and restore treat symlinks as
+ * symlinks, so a broken link such as ~/.local/bin/gh must not be skipped by the
+ * backup and then silently overwritten with no way back.
+ *
+ * @param {string} p
+ * @returns {boolean}
+ */
 const exists = (p) => {
   try {
     fs.lstatSync(p);
