@@ -213,6 +213,64 @@ test("gh wrapper fails closed on a --repo value that cannot be parsed", () => {
   assert.match(result.stderr, /Could not parse a GitHub owner from --repo: not-a-full-repo/);
 });
 
+// Runs bin/gh against the real token command; the stub gh drops a marker file if it is ever
+// reached, so a fall-through to the real gh is visible even when the exit status is 0.
+function runGhWrapper(prefix, args, { env: extraEnv = {}, origin } = {}) {
+  const { tokenCommand, env } = realTokenCommandConfig(prefix);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}real-`));
+  const ranMarker = path.join(tempDir, "ran");
+  const ghCommand = path.join(tempDir, "gh-real");
+
+  executable(ghCommand, `#!/usr/bin/env bash\ntouch "${ranMarker}"\n`);
+  execFileSync("git", ["init", "-q"], { cwd: tempDir });
+
+  if (origin) {
+    execFileSync("git", ["remote", "add", "origin", origin], { cwd: tempDir });
+  }
+
+  const result = spawnSync(path.join(toolDir, "bin", "gh"), args, {
+    cwd: tempDir,
+    encoding: "utf8",
+    env: { ...env, GH_REPO: "", IDENTITY_ROUTER_REAL_GH: ghCommand, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand, ...extraEnv }
+  });
+
+  return { result, ranGh: fs.existsSync(ranMarker) };
+}
+
+for (const [label, args] of [["--repo ''", ["pr", "list", "--repo", ""]], ["-R ''", ["pr", "list", "-R", ""]], ["--repo=", ["pr", "list", "--repo="]]]) {
+  test(`gh wrapper refuses an empty ${label} instead of falling back to GH_REPO or the remote`, () => {
+    const { result, ranGh } = runGhWrapper("multi-account-gh-empty-repo-", args, {
+      env: { GH_REPO: "example-org/repo" },
+      origin: "https://github.com/example-org/repo.git"
+    });
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Missing value for (--repo|-R)/);
+    assert.equal(ranGh, false);
+  });
+}
+
+test("gh wrapper fails closed on an unparseable GH_REPO, naming it", () => {
+  const { result, ranGh } = runGhWrapper("multi-account-gh-bad-ghrepo-", ["pr", "list"], {
+    env: { GH_REPO: "no-slash-segment" },
+    origin: "https://github.com/example-org/repo.git"
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Could not parse a GitHub owner from .*: no-slash-segment/);
+  assert.equal(ranGh, false);
+});
+
+test("gh wrapper fails closed on an unparseable origin remote, naming it", () => {
+  const { result, ranGh } = runGhWrapper("multi-account-gh-bad-origin-", ["repo", "view"], {
+    origin: "https://gitlab.com/example-org/repo.git"
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/example-org\/repo\.git/);
+  assert.equal(ranGh, false);
+});
+
 test("Git credential helper fails closed on an unparseable credential path", () => {
   const { tokenCommand, env } = realTokenCommandConfig("multi-account-cred-unparseable-");
 
