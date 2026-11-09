@@ -25,6 +25,11 @@ function fail(message) {
   throw new Error(message);
 }
 
+// The prefixes GitHub puts on its tokens. No GitHub org name contains `_`, so an owner
+// that starts with one is a pasted token, and is treated as unparseable (docs/adr/0002).
+const GITHUB_TOKEN_PREFIX = /(?:gh[pousr]_|github_pat_)/.source;
+const TOKEN_SHAPED = new RegExp(`^${GITHUB_TOKEN_PREFIX}`, "i");
+
 function normalizeAccount(value) {
   if (typeof value !== "string" || !value.trim()) {
     fail("Account name must be a non-empty string");
@@ -70,7 +75,9 @@ export function parseRepositoryOwner(value) {
     return null;
   }
 
-  return normalizeAccount(parts.at(-2));
+  const owner = normalizeAccount(parts.at(-2));
+
+  return TOKEN_SHAPED.test(owner) ? null : owner;
 }
 
 // Reads the flat appId/privateKeyPath pair of a bootstrap config. Only
@@ -375,7 +382,7 @@ const SECRET_SHAPES = {
   urlUserinfo: (value) => value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/\\]*@/i, `$1${REDACTED}@`),
   queryAndFragment: (value) => value.replace(/\?[^#]*/, `?${REDACTED}`).replace(/#[\s\S]*/, `#${REDACTED}`),
   schemelessUserinfo: (value) => (value.includes("://") ? value : value.replace(/^[^/]*@/, `${REDACTED}@`)),
-  githubToken: (value) => value.replace(/(?:gh[pousr]_|github_pat_)\w+/g, REDACTED),
+  githubToken: (value) => value.replace(new RegExp(`${GITHUB_TOKEN_PREFIX}\\w+`, "gi"), REDACTED),
   // Not a secret shape: keeps an echoed value from writing terminal escapes or extra lines.
   controlCharacters: (value) => value.replace(/[\u0000-\u001f\u007f]/g, "?")
 };
@@ -397,21 +404,39 @@ function resolveOwnerSelector(rawValue, label, secretRedaction) {
   const owner = parseRepositoryOwner(rawValue);
 
   if (!owner) {
-    fail(`Could not parse a GitHub owner from ${label}: ${redactSecrets(rawValue, secretRedaction)}`);
+    failUnparseable(rawValue, label, secretRedaction);
   }
 
   return owner;
 }
 
+// --account and IDENTITY_ROUTER_ORG name the owner directly, so only a token-shaped value
+// is unparseable; it fails here rather than being echoed by the allow-list error.
+function resolveAccountSelector(rawValue, label, secretRedaction) {
+  if (!rawValue) {
+    return null;
+  }
+
+  const account = normalizeAccount(rawValue);
+
+  if (TOKEN_SHAPED.test(account)) {
+    failUnparseable(rawValue, label, secretRedaction);
+  }
+
+  return account;
+}
+
+function failUnparseable(rawValue, label, secretRedaction) {
+  fail(`Could not parse a GitHub owner from ${label}: ${redactSecrets(rawValue, secretRedaction)}`);
+}
+
 // repositoryLabel names the repository selector in errors: callers that did not receive it
 // as `--repo` (identity.mjs reads GH_REPO) pass what the user actually set.
 export function resolveAccount(config, selectors = {}, { allowDefault = true, repositoryLabel = "--repo" } = {}) {
-  const explicitAccount = selectors.account ? normalizeAccount(selectors.account) : null;
+  const explicitAccount = resolveAccountSelector(selectors.account, "--account", config.secretRedaction);
   const repositoryOwner = resolveOwnerSelector(selectors.repository, repositoryLabel, config.secretRedaction);
   const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL", config.secretRedaction);
-  const environmentAccount = selectors.environmentAccount
-    ? normalizeAccount(selectors.environmentAccount)
-    : null;
+  const environmentAccount = resolveAccountSelector(selectors.environmentAccount, "IDENTITY_ROUTER_ORG", config.secretRedaction);
   const selected = explicitAccount
     ?? repositoryOwner
     ?? remoteOwner

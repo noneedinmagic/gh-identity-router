@@ -128,7 +128,9 @@ can carry a credential (`user:token@host/...`, a pasted token). Set the top-leve
 `"secretRedaction": "detected"` to echo the value with only recognisable secrets replaced:
 URL userinfo, query strings and fragments, `user:pass@` before the first `/`, and GitHub
 token prefixes such as `ghp_` and `github_pat_`. A non-GitHub token that is the whole value
-or sits in a URL path is then echoed. The other value, `whole-value`, is the default. See
+or sits in a URL path is then echoed. In every mode, an owner that starts with a GitHub
+token prefix (`GH_REPO=ghp_…/repo`, `--account ghp_…`) is treated as unparseable rather
+than named in the allow-list error. The other value, `whole-value`, is the default. See
 [ADR 0002](docs/adr/0002-secret-redaction-in-error-output.md).
 
 To find the installation IDs for an App, run discovery against a small bootstrap config

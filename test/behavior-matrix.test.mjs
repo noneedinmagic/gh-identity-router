@@ -332,6 +332,15 @@ test("credentials in an unparseable origin are redacted from the footer's error"
   assert.doesNotMatch(footer.stderr, /s3cret/);
 });
 
+test("a token pasted as the owner in GH_REPO is not echoed by the footer's refusal", () => {
+  const footer = unparseableFixture().footer({ GH_REPO: "ghp_s3cret/repo" });
+
+  assert.equal(footer.status, 2);
+  assert.equal(footer.stdout, "");
+  assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
+  assert.doesNotMatch(footer.stderr, /s3cret/);
+});
+
 // A scheme-less value is no URL, so no URL-based redaction sees its userinfo; the default
 // secretRedaction hides the whole value instead (docs/adr/0002).
 test("a scheme-less GH_REPO carrying credentials is not echoed in the footer's error", () => {

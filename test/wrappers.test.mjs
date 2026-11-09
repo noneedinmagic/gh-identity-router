@@ -263,6 +263,17 @@ test("gh wrapper fails closed on an unparseable GH_REPO, labelling it GH_REPO, n
   assert.equal(ranGh, false);
 });
 
+test("gh wrapper never echoes a token pasted as the owner in GH_REPO", () => {
+  const { result, ranGh } = runGhWrapper("multi-account-gh-token-owner-", ["pr", "list"], {
+    env: { GH_REPO: "ghp_s3cret/repo" }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
+  assert.doesNotMatch(result.stderr, /s3cret/);
+  assert.equal(ranGh, false);
+});
+
 test("gh wrapper fails closed on an unparseable origin remote, labelling it remote URL", () => {
   const { result, ranGh } = runGhWrapper("multi-account-gh-bad-origin-", ["repo", "view"], {
     origin: "https://gitlab.com/example-org/repo.git"

@@ -15,6 +15,13 @@ how much of the value the message repeats. The setting is `secretRedaction: "who
   the last `@` in a scheme-less value's first `/`-segment, and any run that starts with a
   GitHub token prefix (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`).
 
+An owner that starts with a GitHub token prefix counts as unparseable, whether it comes
+from a selector (`GH_REPO=ghp_…/repo`), `--account` or `IDENTITY_ROUTER_ORG`. No GitHub
+organization name contains `_`, so such an owner is a pasted token. Without this rule it
+would parse and then be echoed by `GitHub account is not allow-listed: <owner>`, a message
+that must keep naming the owner. `detected` also replaces control characters, so an echoed
+value cannot write terminal escapes or extra lines.
+
 Internally the shapes form a table, and each mode is the set of shapes it replaces.
 `whole-value` is the shape that matches everything. A new mode is a new entry in that
 table, not a new code path.
@@ -57,6 +64,10 @@ Each label leads to the value with one command: the user's own command line,
   `--repo: [redacted]`, and the user finds the value through the label.
 - **`detected` has known holes.** A non-GitHub token that is the whole value, or that sits
   in a URL path, is echoed. Owners who cannot accept that keep `whole-value`.
+- **The owner slot has a hole in every mode.** A non-GitHub secret in the owner position
+  (`SECRET/repo`) parses as an owner, and the allow-list error names it. It looks exactly
+  like an owner name, and that error's job is to name the owner. A managed-user login
+  that starts with a token prefix (`ghp_name`) cannot be routed.
 - **Every new message that repeats user input goes through the same redaction, or
   repeats nothing.** A later change must not restore echoing by default, and must not add
   a shape rule to `whole-value`: that mode's guarantee is that it needs none.

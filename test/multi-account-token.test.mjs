@@ -156,6 +156,21 @@ test("by default an unparseable selector's whole value is replaced, whatever its
   }
 });
 
+test("a token-shaped owner is unparseable, so the allow-list error never echoes it", () => {
+  for (const [selectors, label] of [
+    [{ repository: "ghp_AbCd123/repo" }, "--repo"],
+    [{ remoteUrl: "https://github.com/github_pat_11AB/repo" }, "remote URL"],
+    [{ account: "ghp_AbCd123" }, "--account"],
+    [{ environmentAccount: "gho_AbCd123" }, "IDENTITY_ROUTER_ORG"]
+  ]) {
+    assert.throws(
+      () => resolveAccount(config, selectors),
+      (error) => error.message === `Could not parse a GitHub owner from ${label}: [redacted]`,
+      label
+    );
+  }
+});
+
 test("secretRedaction detected replaces each known secret shape and echoes the rest", () => {
   for (const [value, expected] of [
     ["https://u:tok@gitlab.com/o/r", "https://[redacted]@gitlab.com/o/r"],
