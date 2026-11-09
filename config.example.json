@@ -1,5 +1,6 @@
 {
   "defaultAccount": "your-user",
+  "onMissingCredential": "block",
   "accounts": {
     "your-user": {
       "accountId": 12345678,
@@ -44,6 +45,7 @@
     "identity-only-org": {
       "accountId": 900000002,
       "targetType": "organization",
+      "onMissingCredential": "machine",
       "identity": {
         "login": "your-agent",
         "displayName": "Your Agent"

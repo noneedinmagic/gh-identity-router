@@ -113,7 +113,7 @@ export function assertPrivateFile(filePath, label) {
   }
 }
 
-const ENTRY_KEYS = ["accountId", "targetType", "host", "credential", "identity"];
+const ENTRY_KEYS = ["accountId", "targetType", "host", "credential", "identity", "onMissingCredential"];
 // Pre-v0.1 entries carried these flat on the entry; name the move instead of letting an
 // old config fail as "neither block present".
 const FLAT_CREDENTIAL_KEYS = ["type", "installationId", "tokenPath"];
@@ -124,6 +124,8 @@ const CREDENTIAL_KEYS = {
 const IDENTITY_KEYS = ["login", "displayName", "footerHost", "kind", "commitName", "commitEmail"];
 const IDENTITY_KINDS = ["agent", "human"];
 const SUPPORTED_HOST = "github.com";
+const MISSING_CREDENTIAL_POLICIES = ["machine", "block"];
+const EXIT_CODE_MODES = ["distinct", "gh"];
 
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -145,6 +147,15 @@ function requireNumericId(value, label) {
   }
 
   return Number(value);
+}
+
+// Exact and case-sensitive: a typo must fail at load, never quietly become a default.
+function requireEnum(value, allowed, label) {
+  if (!allowed.includes(value)) {
+    fail(`${label} must be ${allowed.join(" or ")}, got ${JSON.stringify(value)}`);
+  }
+
+  return value;
 }
 
 function requireString(value, label) {
@@ -220,8 +231,16 @@ export function validateAccountEntry(name, rawEntry) {
 
   rejectUnknownKeys(rawEntry, ENTRY_KEYS, `Account ${name}`);
 
-  if (rawEntry.credential === undefined && rawEntry.identity === undefined) {
-    fail(`Account ${name} needs a credential block, an identity block, or both`);
+  const hasPolicy = rawEntry.onMissingCredential !== undefined;
+
+  if (rawEntry.credential === undefined && rawEntry.identity === undefined && !hasPolicy) {
+    fail(`Account ${name} needs a credential block, an identity block, or onMissingCredential`);
+  }
+
+  // Rejected rather than ignored, so the key can later gain a meaning here without
+  // silently changing existing configs.
+  if (rawEntry.credential !== undefined && hasPolicy) {
+    fail(`Account ${name} sets onMissingCredential next to a credential block; it only applies to entries without one`);
   }
 
   // Case-insensitive on input, stored lowercase; GitHub's capitalised API values are
@@ -241,7 +260,10 @@ export function validateAccountEntry(name, rawEntry) {
     targetType,
     host: SUPPORTED_HOST,
     ...(rawEntry.credential !== undefined && { credential: validateCredential(name, rawEntry.credential) }),
-    ...(rawEntry.identity !== undefined && { identity: validateIdentity(name, rawEntry.identity) })
+    ...(rawEntry.identity !== undefined && { identity: validateIdentity(name, rawEntry.identity) }),
+    ...(hasPolicy && {
+      onMissingCredential: requireEnum(rawEntry.onMissingCredential, MISSING_CREDENTIAL_POLICIES, `Account ${name} onMissingCredential`)
+    })
   };
 }
 
@@ -300,7 +322,27 @@ export function validateConfig(config) {
     fail(`Default account must be app-typed while the config also has an app-typed account: ${defaultAccount}`);
   }
 
-  return { defaultAccount, accounts };
+  return {
+    defaultAccount,
+    accounts,
+    ...(config.onMissingCredential !== undefined && {
+      onMissingCredential: requireEnum(config.onMissingCredential, MISSING_CREDENTIAL_POLICIES, "Config field onMissingCredential")
+    }),
+    ...(config.exitCodes !== undefined && {
+      exitCodes: requireEnum(config.exitCodes, EXIT_CODE_MODES, "Config field exitCodes")
+    })
+  };
+}
+
+// The no-credential policy for an owner the router holds no credential for: the entry's
+// own value, else the top-level one, else block. Only an exact "machine" lets the
+// machine's own gh/Git credential act, so a config that never set the key fails closed.
+export function fallsBackToMachine(config, account) {
+  return (account?.onMissingCredential ?? config.onMissingCredential) === "machine";
+}
+
+function blocked(message) {
+  return Object.assign(new Error(message), { blocked: true });
 }
 
 export function readPatToken(account) {
@@ -367,7 +409,11 @@ export function resolveAccount(config, selectors = {}, { allowDefault = true, re
   }
 
   if (!config.accounts[selected]) {
-    fail(`GitHub account is not allow-listed: ${selected}`);
+    if (fallsBackToMachine(config, null)) {
+      return { name: selected, onMissingCredential: "machine" };
+    }
+
+    throw blocked(`GitHub account is not allow-listed: ${selected}`);
   }
 
   return { name: selected, ...config.accounts[selected] };
@@ -784,9 +830,14 @@ function loadPrivateKey(privateKeyPath) {
   return readPrivateKey(privateKeyPath);
 }
 
-// An identity-only entry is valid config but has nothing to mint; wrappers key off this
-// exit code to fall back to the caller's own gh/git credential instead of failing.
+// No credential, policy machine: nothing to mint, and the wrappers key off this code to
+// let the machine's own gh/Git credential act instead of failing. Internal to the
+// wrappers; a gh caller never sees it.
 export const EXIT_NO_CREDENTIAL = 3;
+// No credential, policy block. 5 is outside gh's documented exit codes; under
+// exitCodes: "gh" it folds into gh's 4 ("requires authentication").
+export const EXIT_BLOCKED = 5;
+export const EXIT_BLOCKED_GH = 4;
 
 async function main() {
   const args = parseArguments(process.argv.slice(2));
@@ -848,14 +899,30 @@ async function main() {
     return;
   }
 
+  try {
+    await printToken(config, args);
+  } catch (error) {
+    if (error.blocked) {
+      error.exitCode = config.exitCodes === "gh" ? EXIT_BLOCKED_GH : EXIT_BLOCKED;
+    }
+
+    throw error;
+  }
+}
+
+async function printToken(config, args) {
   const account = resolveAccount(config, {
     ...args,
     environmentAccount: process.env.IDENTITY_ROUTER_ORG
   });
 
   if (!account.credential) {
+    if (!fallsBackToMachine(config, account)) {
+      throw blocked(`Account ${account.name} has no credential block and onMissingCredential is block; add a credential block or set onMissingCredential: machine`);
+    }
+
     throw Object.assign(
-      new Error(`Account ${account.name} has no credential block (identity only); no token minted`),
+      new Error(`Account ${account.name} has no credential block (onMissingCredential: machine); no token minted`),
       { exitCode: EXIT_NO_CREDENTIAL }
     );
   }

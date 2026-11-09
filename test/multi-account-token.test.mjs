@@ -12,6 +12,7 @@ import {
   checkNodeVersion,
   classifyInstallations,
   createAppJwt,
+  fallsBackToMachine,
   listAppInstallations,
   mintInstallationToken,
   parseArguments,
@@ -66,7 +67,43 @@ test("resolves selectors before the configured default", () => {
 test("rejects an owner detected from a repository when it is not allow-listed", () => {
   assert.throws(
     () => resolveAccount(config, { repository: "outsider/repo" }),
-    /not allow-listed/
+    (error) => /not allow-listed/.test(error.message) && error.blocked === true
+  );
+});
+
+test("an unlisted owner under a top-level machine resolves to a bare machine account", () => {
+  const machine = validateConfig({ ...rawConfig, onMissingCredential: "machine" });
+
+  assert.deepEqual(resolveAccount(machine, { repository: "outsider/repo" }), { name: "outsider", onMissingCredential: "machine" });
+});
+
+test("fallsBackToMachine: the entry wins, then the top level, and anything else is block", () => {
+  assert.equal(fallsBackToMachine({}, {}), false);
+  assert.equal(fallsBackToMachine({ onMissingCredential: "machine" }, {}), true);
+  assert.equal(fallsBackToMachine({ onMissingCredential: "machine" }, { onMissingCredential: "block" }), false);
+  assert.equal(fallsBackToMachine({ onMissingCredential: "block" }, { onMissingCredential: "machine" }), true);
+});
+
+test("onMissingCredential and exitCodes reject typos, wrong case and non-strings instead of defaulting", () => {
+  const bare = (value) => ({ ...rawConfig, accounts: { ...rawConfig.accounts, x: { accountId: 9, targetType: "user", onMissingCredential: value } } });
+
+  for (const value of ["machin", "Machine", "BLOCK", "", true, 1, null]) {
+    assert.throws(() => validateConfig(bare(value)), /Account x onMissingCredential must be machine or block/, String(value));
+    assert.throws(() => validateConfig({ ...rawConfig, onMissingCredential: value }), /Config field onMissingCredential must be machine or block/, String(value));
+  }
+
+  for (const value of ["GH", "default", false]) {
+    assert.throws(() => validateConfig({ ...rawConfig, exitCodes: value }), /Config field exitCodes must be distinct or gh/, String(value));
+  }
+
+  assert.equal(validateConfig({ ...rawConfig, exitCodes: "gh" }).exitCodes, "gh");
+  assert.equal(validateConfig(bare("block")).accounts.x.onMissingCredential, "block");
+});
+
+test("onMissingCredential next to a credential block is rejected, not ignored", () => {
+  assert.throws(
+    () => validateAccountEntry("example-org", { ...rawConfig.accounts["example-org"], onMissingCredential: "machine" }),
+    /example-org sets onMissingCredential next to a credential block/
   );
 });
 
@@ -427,7 +464,7 @@ test("validateAccountEntry accepts a credential only, an identity only, or both"
 test("validateAccountEntry rejects an entry with neither block", () => {
   assert.throws(
     () => validateAccountEntry("example-org", { accountId: 2, targetType: "organization" }),
-    /Account example-org needs a credential block, an identity block, or both/
+    /Account example-org needs a credential block, an identity block, or onMissingCredential/
   );
 });
 
@@ -887,6 +924,8 @@ test("config.example.json validates, covering credential-only, identity-only, an
   assert.ok(example.accounts["your-user"].credential && example.accounts["your-user"].identity);
   assert.equal(example.accounts["your-org"].identity, undefined);
   assert.equal(example.accounts["identity-only-org"].credential, undefined);
+  assert.equal(example.accounts["identity-only-org"].onMissingCredential, "machine");
+  assert.equal(example.onMissingCredential, "block");
   assert.equal(example.accounts["contractor-org"].identity.footerHost, "");
 });
 

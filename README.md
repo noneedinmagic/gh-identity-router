@@ -22,6 +22,13 @@
 > retired in favor of an optional per-entry `identity` block. A config in the old shape
 > is rejected with a message naming what to move. See [Configuration](#configuration)
 > and `config.example.json`.
+>
+> **Deliberate break:** an entry with no `credential` block used to mean "use this
+> machine's own `gh`/Git credential". It now means **blocked**, unless the entry (or the
+> top level) sets `"onMissingCredential": "machine"`. Add that line to each identity-only
+> entry to keep the old behavior. If `defaultAccount` names such an entry, unmarked, every
+> `gh` call that resolves no owner is blocked, including `gh --version` and
+> `gh auth status`.
 
 Any coding-agent identity can be backed by its own GitHub App, with a distinct
 installation on each GitHub account it needs to act on. Each installation has its own
@@ -47,7 +54,11 @@ agent context at all, give it its own OS user, not just its own account entry.
 ## Security model
 
 - The local config is an allow-list. The helper never mints a token for an account
-  that is not present in `accounts`.
+  that is not present in `accounts`. By default an unlisted owner is also blocked. A
+  top-level `"onMissingCredential": "machine"` opts unlisted owners into the machine
+  credential instead, so a typo'd owner then quietly uses that credential rather than
+  failing. Blocking is a guardrail, not a security boundary; see
+  [`block` is a guardrail](#block-is-a-guardrail-not-a-security-boundary).
 - Before minting, it confirms that GitHub reports the configured numeric account ID,
   login, target type, installation ID, and active status.
 - `multi-account-token --verify` reports missing, suspended, mismatched, and
@@ -98,6 +109,20 @@ breaking change), and two independent, optional blocks — at least one is requi
 `defaultAccount` names the entry used for **token routing only**, when no owner can be
 resolved for a `gh` call. It never supplies an identity.
 
+`onMissingCredential` (`machine` or `block`) decides what happens when the router has no
+credential for an owner. It applies to an entry without a `credential` block and, set at
+the top level, to owners not listed at all. `machine` lets the machine's own `gh`/Git
+credential act. `block` refuses. An entry's value beats the top-level value, and with
+neither the answer is `block`. An entry may hold only this key (plus `accountId` and
+`targetType`), for example to block one org while the top level says `machine`. It is
+rejected next to a `credential` block: a credential that fails to mint always fails and
+never falls back. Values are exact and case-sensitive; anything else is a config error.
+See [ADR 0001](docs/adr/0001-policy-when-no-credential-applies.md).
+
+A blocked owner makes `multi-account-token` and the `gh` wrapper exit **5**, a code `gh`
+itself does not use. Set the top-level `"exitCodes": "gh"` to get `gh`'s documented **4**
+("requires authentication") instead. The other value, `distinct`, is the default.
+
 To find the installation IDs for an App, run discovery against a small bootstrap config
 that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
 the flat pair is still read, since discovery runs before any account entry exists. Nothing
@@ -132,15 +157,16 @@ and renders the PR footer from the same block. The owner is resolved like a toke
 `GH_REPO`, then the current repository's `origin`, then `IDENTITY_ROUTER_ORG` — but never
 `defaultAccount`.
 
-| `credential` | `identity` | Token minted? | Footer printed? |
-|---|---|---|---|
-| yes | yes | yes | yes |
-| yes | no | yes | no (exit 2) |
-| no | yes | no (exit 3; `gh` and Git use their own credential) | yes, if the derived login matches `identity.login` |
-| no | no | — | — (the config is invalid) |
+| `credential` | `identity` | `onMissingCredential` | Token minted? | Footer printed? |
+|---|---|---|---|---|
+| yes | yes | (rejected) | yes | yes |
+| yes | no | (rejected) | yes | no (exit 2) |
+| no | yes | `machine` | no (exit 3; `gh` and Git use their own credential) | yes, if the derived login matches `identity.login` |
+| no | yes or no | `block` (the default) | no (blocked, exit 5) | no (exit 2) |
+| no | no | `machine` | no (exit 3) | no (exit 2) |
+| no | no | unset | — | — (the config is invalid) |
 
-An owner that is absent from `accounts`, or cannot be resolved at all, gets no token and
-no footer. `identity.sh` exits 0 when the declaration holds, 1 on a login mismatch, and 2
+An owner that is absent from `accounts`, or cannot be resolved at all, gets no footer. `identity.sh` exits 0 when the declaration holds, 1 on a login mismatch, and 2
 when it refuses: no identity applies, the owner has no `identity` block (so no signer is
 declared), or the derived login is a person's account the declaration doesn't vouch for.
 This holds for `--check` as well as `--footer`, so a pre-push hook that calls
@@ -153,14 +179,25 @@ directly — never given an agent footer) or the entry's credential is a PAT (a 
 machine user). `footerHost` omitted means "use this machine's hostname"; an empty string
 omits the host from the footer.
 
-When `multi-account-token` finds an identity-only owner it exits 3 with nothing on
-stdout. The `gh` wrapper then runs the real `gh` unchanged, so `gh` uses its own login.
-This is intentional: an identity-only owner means "use this machine's own `gh`
-credential", and `identity.login` only gates `identity.sh` and the footer — it does not
-stop `gh` from acting as whatever account is logged in. Add a `credential` block if you
-want the router to supply the token instead. The Git credential helper answers nothing,
-but `setup` clears the other github.com helpers, so HTTPS Git for an identity-only
-owner has no credential unless you configure another helper after this one.
+When `multi-account-token` finds a `machine` owner it exits 3 with nothing on stdout. The
+`gh` wrapper then runs the real `gh` unchanged, so `gh` uses its own login, and
+`identity.login` only gates `identity.sh` and the footer: it does not stop `gh` from
+acting as whatever account is logged in. Add a `credential` block if you want the router
+to supply the token instead. The Git credential helper answers nothing, but `setup`
+clears the other github.com helpers, so HTTPS Git for a `machine` owner has no credential
+unless you configure another helper after this one.
+
+A blocked owner is refused by `identity.sh` too, even with an `identity` block: the
+router lets nothing act for it, so any credential seen there came around the router.
+
+### `block` is a guardrail, not a security boundary
+
+`block` only covers the paths this tool answers: the `gh` wrapper and the HTTPS Git
+credential helper. Running the real `gh` directly, an SSH remote, or a later Git config
+that resets the helper list (an empty `credential.helper` in a repository's own config,
+or `git -c credential.helper= ...`) and names another helper all bypass it. A helper
+configured after this one is not a bypass, since `quit=1` stops Git before reaching it.
+Use `block` to stop mistakes, not to contain an untrusted process.
 
 **The footer follows the owner it resolves, not the pull request's target.** In a fork
 clone (`origin` is your fork, the PR goes to another owner) or with
@@ -190,7 +227,7 @@ as `contractor-org` does in `config.example.json`.
 
 - **`defaultAccount` must not hold a PAT credential whenever the config also has an
   App-typed account.** A PAT default is only allowed in a config with no App entries at
-  all (a pure-PAT host); an identity-only default mints nothing and is always fine. This bounds the damage of an unresolved selector that falls
+  all (a pure-PAT host); an identity-only default mints nothing and is always allowed (it is blocked unless marked `machine`). This bounds the damage of an unresolved selector that falls
   through to the default: a wrong-owner App token is dead within the hour, while a
   wrong-owner PAT default is a long-lived static secret that a misconfigured
   `credential.helper` can persist in plaintext.
@@ -292,8 +329,8 @@ cd /path/to/a/your-org/clone && gh repo view
 IDENTITY_ROUTER_ORG=your-org gh api /orgs/your-org
 ```
 
-If a repository owner is detected but is not allow-listed, the command fails. It does
-not fall back to the default account. A selector that was *supplied but cannot be
+If a repository owner is detected but is not allow-listed, it never falls back to the
+default account: it is blocked, unless the top-level `onMissingCredential` is `machine`. A selector that was *supplied but cannot be
 parsed* — a `--repo owner` missing the `/repo` segment, a non-`github.com` host, an
 unparseable remote URL — is treated the same way: it fails with the offending string
 named, rather than silently falling through to `defaultAccount`.
@@ -354,9 +391,10 @@ through `hasconfig:remote.*.url`.
 
 ## Failure modes
 
-The credential helper mints the token before printing anything; if minting fails, the
-helper exits non-zero with nothing on stdout, so Git surfaces the real auth failure
-instead of sending an empty password. Every GitHub API request made while minting a
+The credential helper mints the token before printing anything. If minting fails, or the
+owner is blocked, the helper answers only `quit=1`. Git then stops with "credential
+helper ... told us to quit" instead of asking a later helper or prompting for a password.
+The reason is on the line above it, from the token command's stderr. Every GitHub API request made while minting a
 token times out after 10 seconds rather than hanging on a stalled connection.
 
 ## Inventory across accounts
