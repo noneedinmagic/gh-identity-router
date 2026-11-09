@@ -634,6 +634,14 @@ function verifyInstall({ l, launcher, configPath, verifyCommand, includes }) {
         || live[1] !== email;
     });
 
+    // Managed includes the config no longer requests keep overriding the global author.
+    const requested = new Set(includes.map(({ fragment }) => fragment));
+    const orphaned = [...new Set(managed.filter((e) => !requested.has(e.value)).map((e) => path.basename(e.value, ".gitconfig")))];
+
+    if (orphaned.length) {
+      return `managed include for ${orphaned.join(", ")} is no longer in the config (re-run setup)`;
+    }
+
     if (stale.length) {
       return `missing or out of date for ${stale.map((s) => s.owner).join(", ")} (re-run setup)`;
     }
