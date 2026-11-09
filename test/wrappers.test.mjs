@@ -253,12 +253,13 @@ for (const [label, args] of [["--repo ''", ["pr", "list", "--repo", ""]], ["-R '
 
 test("gh wrapper fails closed on an unparseable GH_REPO, labelling it GH_REPO, not --repo", () => {
   const { result, ranGh } = runGhWrapper("multi-account-gh-bad-ghrepo-", ["pr", "list"], {
-    env: { GH_REPO: "no-slash-segment" },
+    env: { GH_REPO: "x-access-token:s3cret@gitlab.com/org/repo" },
     origin: "https://github.com/example-org/repo.git"
   });
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
+  assert.doesNotMatch(result.stderr, /s3cret/);
   assert.equal(ranGh, false);
 });
 
@@ -276,7 +277,7 @@ test("Git credential helper fails closed on an unparseable credential path, labe
   const { tokenCommand, env } = realTokenCommandConfig("multi-account-cred-unparseable-");
 
   const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
-    input: "protocol=https\nhost=github.com\npath=not-a-full-repo\n\n",
+    input: "protocol=https\nhost=github.com\npath=ghp_s3cret\n\n",
     encoding: "utf8",
     env: { ...env, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
   });
@@ -284,6 +285,7 @@ test("Git credential helper fails closed on an unparseable credential path, labe
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, "quit=1\n");
   assert.match(result.stderr, /Could not parse a GitHub owner from Git credential path: \[redacted\]/);
+  assert.doesNotMatch(result.stderr, /s3cret/);
 });
 
 test("Git credential helper uses the owner from the credential path", () => {

@@ -373,17 +373,20 @@ const REDACTED = "[redacted]";
 const SECRET_SHAPES = {
   everything: () => REDACTED,
   urlUserinfo: (value) => value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/\\]*@/i, `$1${REDACTED}@`),
-  queryAndFragment: (value) => value.replace(/\?[^#]*/, `?${REDACTED}`).replace(/#.*/, `#${REDACTED}`),
+  queryAndFragment: (value) => value.replace(/\?[^#]*/, `?${REDACTED}`).replace(/#[\s\S]*/, `#${REDACTED}`),
   schemelessUserinfo: (value) => (value.includes("://") ? value : value.replace(/^[^/]*@/, `${REDACTED}@`)),
-  githubToken: (value) => value.replace(/(?:gh[pousr]_|github_pat_)\w+/g, REDACTED)
+  githubToken: (value) => value.replace(/(?:gh[pousr]_|github_pat_)\w+/g, REDACTED),
+  // Not a secret shape: keeps an echoed value from writing terminal escapes or extra lines.
+  controlCharacters: (value) => value.replace(/[\u0000-\u001f\u007f]/g, "?")
 };
 const SECRET_REDACTION_MODES = {
   "whole-value": ["everything"],
-  detected: ["urlUserinfo", "queryAndFragment", "schemelessUserinfo", "githubToken"]
+  detected: ["urlUserinfo", "queryAndFragment", "schemelessUserinfo", "githubToken", "controlCharacters"]
 };
 
 export function redactSecrets(value, mode = "whole-value") {
-  return SECRET_REDACTION_MODES[mode].reduce((redacted, shape) => SECRET_SHAPES[shape](redacted), value);
+  // Trimmed like parseRepositoryOwner trims, so a leading space cannot dodge an anchored shape.
+  return SECRET_REDACTION_MODES[mode].reduce((redacted, shape) => SECRET_SHAPES[shape](redacted), value.trim());
 }
 
 function resolveOwnerSelector(rawValue, label, secretRedaction) {

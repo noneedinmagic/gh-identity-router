@@ -164,6 +164,9 @@ test("secretRedaction detected replaces each known secret shape and echoes the r
     ["x-access-token:tok@gitlab.com/o/r", "[redacted]@gitlab.com/o/r"],
     ["ghp_abc123", "[redacted]"],
     ["https://host/github_pat_11AB_cd/r", "https://host/[redacted]/r"],
+    [" \thttps://u:tok@gitlab.com/o/r", "https://[redacted]@gitlab.com/o/r"],
+    ["a#b\ntok", "a#[redacted]"],
+    ["acme\u001b[31m", "acme?[31m"],
     ["acme", "acme"]
   ]) {
     assert.equal(redactSecrets(value, "detected"), expected, value);
