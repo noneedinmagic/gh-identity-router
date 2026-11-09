@@ -330,6 +330,9 @@ export function validateConfig(config) {
     }),
     ...(config.exitCodes !== undefined && {
       exitCodes: requireEnum(config.exitCodes, EXIT_CODE_MODES, "Config field exitCodes")
+    }),
+    ...(config.secretRedaction !== undefined && {
+      secretRedaction: requireEnum(config.secretRedaction, Object.keys(SECRET_REDACTION_MODES), "Config field secretRedaction")
     })
   };
 }
@@ -359,23 +362,31 @@ export function readPatToken(account) {
   return token;
 }
 
-// An unparseable selector can still be a URL carrying a real credential
-// (`https://x-access-token:TOKEN@host/...`) — strip it before the value is echoed back
-// in an error message, so a bad selector never leaks a secret into stderr/logs.
-function redactCredentials(value) {
-  try {
-    const url = new URL(value);
+// An unparseable selector can still carry a real credential (`https://user:TOKEN@host/...`,
+// `user:TOKEN@host/org/repo`, or a pasted `ghp_...` token), and the error that names it
+// lands in stderr/logs. Each shape below is one way a secret hides in such a value; each
+// secretRedaction mode is the set of shapes it replaces (docs/adr/0002). Userinfo is
+// everything before the last `@` ahead of the first slash, which over-redacts rather than
+// trusting `?`/`#` to end it. "whole-value" must stay just `everything`: no shape rule can
+// tell a pasted token from a mistyped owner, so it is the only mode that cannot leak.
+const REDACTED = "[redacted]";
+const SECRET_SHAPES = {
+  everything: () => REDACTED,
+  urlUserinfo: (value) => value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/\\]*@/i, `$1${REDACTED}@`),
+  queryAndFragment: (value) => value.replace(/\?[^#]*/, `?${REDACTED}`).replace(/#.*/, `#${REDACTED}`),
+  schemelessUserinfo: (value) => (value.includes("://") ? value : value.replace(/^[^/]*@/, `${REDACTED}@`)),
+  githubToken: (value) => value.replace(/(?:gh[pousr]_|github_pat_)\w+/g, REDACTED)
+};
+const SECRET_REDACTION_MODES = {
+  "whole-value": ["everything"],
+  detected: ["urlUserinfo", "queryAndFragment", "schemelessUserinfo", "githubToken"]
+};
 
-    url.username = "";
-    url.password = "";
-
-    return url.toString();
-  } catch {
-    return value.replace(/:\/\/[^/\s]*@/, "://[redacted]@");
-  }
+export function redactSecrets(value, mode = "whole-value") {
+  return SECRET_REDACTION_MODES[mode].reduce((redacted, shape) => SECRET_SHAPES[shape](redacted), value);
 }
 
-function resolveOwnerSelector(rawValue, label) {
+function resolveOwnerSelector(rawValue, label, secretRedaction) {
   if (!rawValue) {
     return null;
   }
@@ -383,7 +394,7 @@ function resolveOwnerSelector(rawValue, label) {
   const owner = parseRepositoryOwner(rawValue);
 
   if (!owner) {
-    fail(`Could not parse a GitHub owner from ${label}: ${redactCredentials(rawValue)}`);
+    fail(`Could not parse a GitHub owner from ${label}: ${redactSecrets(rawValue, secretRedaction)}`);
   }
 
   return owner;
@@ -393,8 +404,8 @@ function resolveOwnerSelector(rawValue, label) {
 // as `--repo` (identity.mjs reads GH_REPO) pass what the user actually set.
 export function resolveAccount(config, selectors = {}, { allowDefault = true, repositoryLabel = "--repo" } = {}) {
   const explicitAccount = selectors.account ? normalizeAccount(selectors.account) : null;
-  const repositoryOwner = resolveOwnerSelector(selectors.repository, repositoryLabel);
-  const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL");
+  const repositoryOwner = resolveOwnerSelector(selectors.repository, repositoryLabel, config.secretRedaction);
+  const remoteOwner = resolveOwnerSelector(selectors.remoteUrl, "remote URL", config.secretRedaction);
   const environmentAccount = selectors.environmentAccount
     ? normalizeAccount(selectors.environmentAccount)
     : null;
@@ -770,7 +781,7 @@ export function parseArguments(argv) {
 
       result.permissions = parsePermissionsArgument(value);
       index += 1;
-    } else if (["--org", "--account", "--repo", "--remote-url"].includes(argument)) {
+    } else if (["--org", "--account", "--repo", "--remote-url", "--repo-label"].includes(argument)) {
       const value = argv[index + 1];
 
       if (!value) {
@@ -781,7 +792,8 @@ export function parseArguments(argv) {
         "--org": "account",
         "--account": "account",
         "--repo": "repository",
-        "--remote-url": "remoteUrl"
+        "--remote-url": "remoteUrl",
+        "--repo-label": "repositoryLabel"
       }[argument];
       result[key] = value;
       index += 1;
@@ -910,11 +922,13 @@ async function main() {
   }
 }
 
-async function printToken(config, args) {
+async function printToken(config, { repositoryLabel, ...args }) {
+  // The wrappers pass --repo-label so the error names what the user set (GH_REPO, Git's
+  // credential path), since under whole-value redaction the label is all they get.
   const account = resolveAccount(config, {
     ...args,
     environmentAccount: process.env.IDENTITY_ROUTER_ORG
-  });
+  }, { repositoryLabel });
 
   if (!account.credential) {
     if (!fallsBackToMachine(config, account)) {

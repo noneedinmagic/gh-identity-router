@@ -123,6 +123,14 @@ A blocked owner makes `multi-account-token` and the `gh` wrapper exit **5**, a c
 itself does not use. Set the top-level `"exitCodes": "gh"` to get `gh`'s documented **4**
 ("requires authentication") instead. The other value, `distinct`, is the default.
 
+An error about a selector it cannot parse shows the value as `[redacted]`, since the value
+can carry a credential (`user:token@host/...`, a pasted token). Set the top-level
+`"secretRedaction": "detected"` to echo the value with only recognisable secrets replaced:
+URL userinfo, query strings and fragments, `user:pass@` before the first `/`, and GitHub
+token prefixes such as `ghp_` and `github_pat_`. A non-GitHub token that is the whole value
+or sits in a URL path is then echoed. The other value, `whole-value`, is the default. See
+[ADR 0002](docs/adr/0002-secret-redaction-in-error-output.md).
+
 To find the installation IDs for an App, run discovery against a small bootstrap config
 that holds just the App pair (`{"appId": ..., "privateKeyPath": ...}`) — the only place
 the flat pair is still read, since discovery runs before any account entry exists. Nothing
@@ -338,8 +346,11 @@ IDENTITY_ROUTER_ORG=your-org gh api /orgs/your-org
 If a repository owner is detected but is not allow-listed, it never falls back to the
 default account: it is blocked, unless the top-level `onMissingCredential` is `machine`. A selector that was *supplied but cannot be
 parsed* — a `--repo owner` missing the `/repo` segment, a non-`github.com` host, an
-unparseable remote URL — is treated the same way: it fails with the offending string
-named, rather than silently falling through to `defaultAccount`.
+unparseable remote URL — is treated the same way: it fails rather than silently falling
+through to `defaultAccount`. The error names which selector failed (`--repo`, `GH_REPO`,
+`remote URL`, or `Git credential path` for the credential helper) and, because the value
+can carry a credential, shows the value as `[redacted]` by default. See `secretRedaction`
+under Configuration to echo it with only its detected secrets replaced.
 
 For HTTPS Git operations, the credential helper reads the owner from the credential
 path. Continue using HTTPS remotes; commit `user.name` and `user.email` settings are

@@ -6,7 +6,7 @@ token_command="${IDENTITY_ROUTER_TOKEN_COMMAND:-$HOME/.local/bin/multi-account-t
 repo="${1:?Usage: mint-dispatch-token OWNER/REPO}"
 
 if [[ "$repo" != */* ]]; then
-  echo "mint-dispatch-token: repo must be OWNER/REPO, got: $repo" >&2
+  echo "mint-dispatch-token: repo must be OWNER/REPO" >&2
   exit 2
 fi
 
@@ -15,7 +15,7 @@ repo_name="${repo##*/}"
 repo_name="${repo_name%.git}"
 
 if [[ -z "$repo_owner" || -z "$repo_name" ]]; then
-  echo "mint-dispatch-token: repo must be OWNER/REPO, got: $repo" >&2
+  echo "mint-dispatch-token: repo must be OWNER/REPO" >&2
   exit 2
 fi
 

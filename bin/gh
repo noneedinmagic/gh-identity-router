@@ -39,7 +39,7 @@ token_args=()
 if [[ -n "$repo" ]]; then
   token_args=(--repo "$repo")
 elif [[ -n "${GH_REPO:-}" ]]; then
-  token_args=(--repo "$GH_REPO")
+  token_args=(--repo "$GH_REPO" --repo-label GH_REPO)
 elif remote_url="$(git config --get remote.origin.url 2>/dev/null)" && [[ -n "$remote_url" ]]; then
   token_args=(--remote-url "$remote_url")
 fi
