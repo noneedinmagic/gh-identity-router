@@ -61,7 +61,9 @@ router supplies no credential.
 - **A top-level `machine` gives up the allow-list for unlisted owners.** A typo'd owner
   or `--account` then quietly uses the machine credential instead of failing.
 - **`block` is a guardrail, not a security boundary.** Anything that runs the real `gh`
-  directly, an SSH remote, or a Git credential helper configured before this one bypasses
-  it.
+  directly, an SSH remote, or a later Git config that resets the helper list (an empty
+  `credential.helper` in a repository's config, or `-c credential.helper=`) and names
+  another helper bypasses it. A helper configured after this one does not, because
+  `quit=1` stops Git first.
 - Values are exact and case-sensitive. Any other value, at either level, is rejected when
   the config is loaded.

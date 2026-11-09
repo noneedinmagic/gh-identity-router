@@ -57,7 +57,8 @@ agent context at all, give it its own OS user, not just its own account entry.
   that is not present in `accounts`. By default an unlisted owner is also blocked. A
   top-level `"onMissingCredential": "machine"` opts unlisted owners into the machine
   credential instead, so a typo'd owner then quietly uses that credential rather than
-  failing.
+  failing. Blocking is a guardrail, not a security boundary; see
+  [`block` is a guardrail](#block-is-a-guardrail-not-a-security-boundary).
 - Before minting, it confirms that GitHub reports the configured numeric account ID,
   login, target type, installation ID, and active status.
 - `multi-account-token --verify` reports missing, suspended, mismatched, and
@@ -192,9 +193,11 @@ router lets nothing act for it, so any credential seen there came around the rou
 ### `block` is a guardrail, not a security boundary
 
 `block` only covers the paths this tool answers: the `gh` wrapper and the HTTPS Git
-credential helper. Running the real `gh` directly, an SSH remote, or a Git credential
-helper configured *before* this one all bypass it. Use it to stop mistakes, not to
-contain an untrusted process.
+credential helper. Running the real `gh` directly, an SSH remote, or a later Git config
+that resets the helper list (an empty `credential.helper` in a repository's own config,
+or `git -c credential.helper= ...`) and names another helper all bypass it. A helper
+configured after this one is not a bypass, since `quit=1` stops Git before reaching it.
+Use `block` to stop mistakes, not to contain an untrusted process.
 
 **The footer follows the owner it resolves, not the pull request's target.** In a fork
 clone (`origin` is your fork, the PR goes to another owner) or with

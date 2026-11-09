@@ -35,7 +35,9 @@ _Avoid_: ambient credential, transient, the user's credential
 
 **Uncredentialed entry**:
 An account entry with no routed credential — situation (a).
-_Avoid_: identity-only entry (it may have no identity either)
+
+**Identity-only entry**:
+An uncredentialed entry that declares an identity.
 
 **Bare entry**:
 An uncredentialed entry that also declares no identity and exists only to state a
