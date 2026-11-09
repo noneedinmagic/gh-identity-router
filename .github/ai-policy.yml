@@ -78,7 +78,6 @@ risk:
   human_required_paths:
     - src/**
     - bin/**
-    - install.sh
     - scripts/**
     - .github/**
   max_files_changed: 25

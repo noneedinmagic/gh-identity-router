@@ -9,11 +9,11 @@ Every variable the code actually reads or sets, with a one-line purpose. A test
 |---|---|---|
 | `AGENT_IDENTITY_GH_BIN` | `src/identity.mjs` | Overrides the `gh` binary used to derive the acting credential — lets tests substitute a fixture without touching the real `gh`. |
 | `GH_REPO` | `bin/gh`, `src/identity.mjs` | Selects the target repository owner when `--repo`/`-R` isn't passed explicitly (for `identity.sh`, the owner whose `identity` block applies). |
-| `IDENTITY_ROUTER_CONFIG` | `src/multi-account-token.mjs` (also read by `src/identity.mjs`), `install.sh` | Overrides the config file path (default `~/.config/gh-identity-router/config.json`). |
+| `IDENTITY_ROUTER_CONFIG` | `src/multi-account-token.mjs` (also read by `src/identity.mjs`), `src/setup.mjs` | Overrides the config file path (default `~/.config/gh-identity-router/config.json`). |
 | `IDENTITY_ROUTER_ORG` | `src/multi-account-token.mjs`, `src/identity.mjs` | Selects the target account when no `--repo`/`GH_REPO`/git-remote owner can be resolved. |
 | `IDENTITY_ROUTER_REAL_GH` | `bin/gh` | Overrides the path to the real `gh` binary this wrapper delegates to (default `/usr/bin/gh`). |
 | `IDENTITY_ROUTER_TOKEN_COMMAND` | `bin/gh`, `bin/git-credential-gh-identity-router`, `bin/mint-dispatch-token` | Overrides the token-minting command each wrapper shells out to (default `$HOME/.local/bin/multi-account-token`). |
-| `IDENTITY_ROUTER_VERIFY_COMMAND` | `install.sh` | Overrides the command `install.sh` runs to verify the config before and after installing. |
+| `IDENTITY_ROUTER_VERIFY_COMMAND` | `src/setup.mjs` | Overrides the command `setup` runs (with `--verify`) to verify the config before and after installing, in place of the source tree's and the installed `multi-account-token`. |
 
 ## Set as output (not read by this tool)
 

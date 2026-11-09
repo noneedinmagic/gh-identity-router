@@ -15,7 +15,7 @@ const SOURCE_FILES = [
   "bin/identity.sh",
   "bin/mint-dispatch-token",
   "bin/git-credential-gh-identity-router",
-  "install.sh",
+  "src/setup.mjs",
 ];
 
 // Vars this tool deliberately reads/sets from gh's own reserved namespace, plus other

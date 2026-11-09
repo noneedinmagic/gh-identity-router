@@ -19,7 +19,7 @@ Please include:
 ## Scope
 
 In scope: credential minting and scoping logic (`src/`), the `gh`/credential-helper
-wrappers (`bin/`), the installer (`install.sh`), and the identity-resolution logic
+wrappers (`bin/`), the setup command (`src/setup.mjs`), and the identity-resolution logic
 (`bin/identity.sh`).
 
 Out of scope: vulnerabilities in GitHub's own API or Apps platform (report those to
