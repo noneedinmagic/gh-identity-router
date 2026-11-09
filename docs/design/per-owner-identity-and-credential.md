@@ -31,15 +31,16 @@ blocks:
 - `identity` — `login`, `displayName`, `footerHost` (empty omits the host from the PR
   footer), `kind: agent|human`, `commitName`, `commitEmail`.
 
-At least one block must be present; an entry with neither is invalid. Behavior by
-which blocks exist:
+At least one block must be present, unless the entry sets `onMissingCredential`
+(see [ADR 0001](../adr/0001-policy-when-no-credential-applies.md)). Behavior by which
+blocks exist:
 
 | `credential` | `identity` | Token minted? | Footer printed? |
 |---|---|---|---|
 | yes | yes | yes | yes |
 | yes | no | yes | no (exit ≠ 0) |
-| no | yes | no (a normal `gh auth` credential must apply) | yes, if `gh auth status` matches `identity.login` |
-| no | no | — | — (entry invalid) |
+| no | yes | no: the machine's own credential applies under `onMissingCredential: machine`; blocked otherwise | under `machine`, yes if `gh auth status` matches `identity.login`; blocked, no |
+| no | no | — | — (entry invalid unless it sets `onMissingCredential`) |
 
 `defaultAccount` is retained for token routing only, when no owner can be resolved for
 a `gh` call; it never supplies a fallback identity. An owner absent from `accounts`,
@@ -93,11 +94,13 @@ It resolves the owner like a token does but with the `defaultAccount` fallback d
 
 ## How the implementation reads the matrix
 
-- An identity-only entry makes the token command exit 3 with nothing on stdout. The `gh`
-  wrapper treats exactly that code as "run the real `gh` unchanged" and the Git
-  credential helper as "answer nothing"; every other non-zero code still fails closed.
+- An entry with no credential under `onMissingCredential: machine` makes the token
+  command exit 3 with nothing on stdout. The `gh` wrapper treats exactly that code as
+  "run the real `gh` unchanged" and the Git credential helper as "answer nothing". Every
+  other non-zero code still fails closed: a blocked owner exits 5 (4 under
+  `exitCodes: gh`), and the Git helper answers `quit=1` for it and for any failed mint.
 - Identity commands exit 0 (holds), 1 (declared login differs from the derived one) or 2
-  (refused). Credential-only, absent, unresolvable, and invalid-config owners are all 2
+  (refused). Credential-only, blocked, absent, unresolvable, and invalid-config owners are all 2
   with nothing on stdout, for `--check` as well as `--footer`: an owner with no `identity`
   block has no declared signer to verify, so a pre-push gate refuses it too.
 - A derived login that is not a GitHub App is accepted only when `identity.login` names

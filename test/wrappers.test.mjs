@@ -25,7 +25,7 @@ const fixtureConfig = {
         commitEmail: "1+example-bot[bot]@users.noreply.github.com"
       }
     },
-    "plain-org": { accountId: 2, targetType: "Organization", identity: { login: "plain-bot" } }
+    "plain-org": { accountId: 2, targetType: "Organization", identity: { login: "plain-bot" }, onMissingCredential: "machine" }
   }
 };
 
@@ -281,7 +281,7 @@ test("Git credential helper fails closed on an unparseable credential path", () 
   });
 
   assert.notEqual(result.status, 0);
-  assert.equal(result.stdout, "");
+  assert.equal(result.stdout, "quit=1\n");
   assert.match(result.stderr, /Could not parse a GitHub owner from --repo: not-a-full-repo/);
 });
 
@@ -305,7 +305,7 @@ test("Git credential helper uses the owner from the credential path", () => {
   assert.equal(fs.readFileSync(logPath, "utf8").trim(), "--repo example-org/repo.git");
 });
 
-test("Git credential helper exits non-zero with empty stdout when token minting fails", () => {
+test("Git credential helper exits non-zero and answers only quit=1 when token minting fails", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-credential-fail-"));
   const tokenCommand = path.join(tempDir, "token");
 
@@ -320,7 +320,7 @@ test("Git credential helper exits non-zero with empty stdout when token minting 
   });
 
   assert.notEqual(result.status, 0);
-  assert.equal(result.stdout, "");
+  assert.equal(result.stdout, "quit=1\n");
 });
 
 test("gh wrapper runs the real gh without GH_TOKEN when the token command reports an identity-only owner", () => {
@@ -357,6 +357,66 @@ test("gh wrapper still fails closed on any other token command failure", () => {
 
   assert.equal(result.status, 1);
   assert.equal(fs.existsSync(logPath), false);
+});
+
+test("gh wrapper passes a blocked owner's exit code through without running the real gh", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-gh-blocked-"));
+  const logPath = path.join(tempDir, "log");
+  const tokenCommand = path.join(tempDir, "token");
+  const ghCommand = path.join(tempDir, "gh-real");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\necho 'blocked' >&2\nexit 5\n");
+  executable(ghCommand, `#!/usr/bin/env bash\necho ran >>"${logPath}"\n`);
+
+  const result = spawnSync(path.join(toolDir, "bin", "gh"), ["pr", "list", "--repo", "example-org/repo"], {
+    encoding: "utf8",
+    env: { ...process.env, IDENTITY_ROUTER_REAL_GH: ghCommand, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.equal(result.status, 5);
+  assert.match(result.stderr, /blocked/);
+  assert.equal(fs.existsSync(logPath), false);
+});
+
+test("Git credential helper answers quit=1 for a blocked owner", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-credential-blocked-"));
+  const tokenCommand = path.join(tempDir, "token");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nexit 5\n");
+  const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
+    input: "protocol=https\nhost=github.com\npath=example-org/repo.git\n\n",
+    encoding: "utf8",
+    env: { ...process.env, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.equal(result.stdout, "quit=1\n");
+});
+
+// Git ignores a helper's exit code and moves on to the next helper or a prompt; only
+// quit=1 stops it. Isolated from the developer's own helpers, askpass and terminal.
+test("real Git stops at a blocked owner instead of asking a later helper", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-credential-git-quit-"));
+  const tokenCommand = path.join(tempDir, "token");
+  const laterHelper = path.join(tempDir, "later-helper");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nexit 5\n");
+  executable(laterHelper, "#!/usr/bin/env bash\ncat >/dev/null\necho username=later\necho password=leaked\n");
+
+  const env = { ...process.env, HOME: tempDir, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand };
+
+  delete env.GIT_ASKPASS;
+  delete env.SSH_ASKPASS;
+
+  const result = spawnSync("git", [
+    "-c", "credential.helper=",
+    "-c", `credential.helper=${path.join(toolDir, "bin", "git-credential-gh-identity-router")}`,
+    "-c", `credential.helper=${laterHelper}`,
+    "credential", "fill"
+  ], { input: "protocol=https\nhost=github.com\npath=example-org/repo.git\n\n", encoding: "utf8", env });
+
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stdout, /leaked/);
+  assert.match(result.stderr, /told us to quit/);
 });
 
 test("Git credential helper answers nothing, successfully, for an identity-only owner", () => {
@@ -801,7 +861,7 @@ test("the installed multi-account-token launcher works with no node on PATH", ()
   // Absolute /bin/sh so the shell itself starts; a null status (spawn failure) fails this.
   assert.ok(spawnSync("/bin/sh", ["-c", "command -v node"], { env }).status > 0, "control: PATH really has no node");
 
-  // plain-org is identity-only: exit 3 and this message can only come from the script
+  // plain-org is identity-only, marked machine: exit 3 and this message can only come from the script
   // running under node.
   const result = spawnSync(launcher, ["--repo", "plain-org/x"], { encoding: "utf8", env });
   assert.equal(result.status, 3, result.stdout + result.stderr);

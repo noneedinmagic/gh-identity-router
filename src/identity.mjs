@@ -20,7 +20,8 @@
 //   identity.sh --self-check     run built-in fixtures, print pass/fail.
 //
 // Exit codes: 0 ok, 1 declared identity does not match the derived credential,
-// 2 refused: the owner cannot be resolved or is not allow-listed, the owner has no
+// 2 refused: the owner cannot be resolved, is not allow-listed, or is blocked (no
+// credential block and onMissingCredential is block), the owner has no
 // identity block (credential only, so no signer is declared — --check refuses too), or
 // the derived credential is a human account not explicitly opted in. Under --footer, 2
 // is also used for kind: human — the footer is refused, not the identity itself.
@@ -30,7 +31,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { checkNodeVersion, loadRawConfig, resolveAccount, validateConfig } from "./multi-account-token.mjs";
+import { checkNodeVersion, fallsBackToMachine, loadRawConfig, resolveAccount, validateConfig } from "./multi-account-token.mjs";
 
 const GH_AUTH_STATUS_TIMEOUT_MS = 10_000;
 
@@ -172,8 +173,10 @@ export function decideStatus(derivedRaw, declaredLogin, declaredKind, credential
 }
 
 // Finds the account whose identity block applies. Never throws: an unreadable or invalid
-// config, an unresolvable owner, and an owner outside the allow-list are all the same
-// answer to the caller — no identity applies, so nothing may be signed with one.
+// config, an unresolvable owner, an owner outside the allow-list, and a blocked owner are
+// all the same answer to the caller — no identity applies, so nothing may be signed with
+// one. A blocked owner is refused even with an identity block: the router lets nothing
+// act for it, so any credential seen here arrived around the router.
 export function resolveIdentityAccount(env = process.env) {
   try {
     const config = validateConfig(loadRawConfig(env));
@@ -186,6 +189,10 @@ export function resolveIdentityAccount(env = process.env) {
       },
       { allowDefault: false, repositoryLabel: "GH_REPO" }
     );
+
+    if (!account.credential && !fallsBackToMachine(config, account)) {
+      return { account: null, refusal: `${account.name} is blocked (no credential block and onMissingCredential is block)` };
+    }
 
     return { account, refusal: "" };
   } catch (error) {
@@ -249,7 +256,7 @@ export function printBlock(state) {
   } else if (state.owner) {
     lines.push(`declared: (none — REFUSED, no identity block for ${state.owner})`);
   } else {
-    lines.push("declared: (none — no owner resolved)");
+    lines.push("declared: (none — no identity applies)");
   }
 
   lines.push(`derived:  ${state.derivedRaw}`);

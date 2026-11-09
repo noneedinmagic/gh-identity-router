@@ -44,8 +44,9 @@ elif remote_url="$(git config --get remote.origin.url 2>/dev/null)" && [[ -n "$r
   token_args=(--remote-url "$remote_url")
 fi
 
-# Exit 3 = the owner is identity-only (no credential block): mint nothing and let the
-# real gh use whatever credential it would have used without this wrapper.
+# Exit 3 = no credential and onMissingCredential machine: mint nothing and let the real
+# gh use whatever credential it would have used without this wrapper. Every other
+# non-zero code (5 or 4 when blocked) is passed through without running the real gh.
 token_status=0
 token="$("$token_command" "${token_args[@]}")" || token_status=$?
 if ((token_status == 3)); then
