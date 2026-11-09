@@ -597,6 +597,9 @@ function setup({ dryRun, verify, node }) {
   if (shadow) {
     console.warn(`Warning: ${shadow}`);
   }
+
+  // Only a pointer: setup never writes into an agent's instruction files.
+  console.log(`Coding agents: paste ${path.join(PKG_DIR, "docs", "agent-usage.md")} into their instruction file (CLAUDE.md, AGENTS.md, ...)`);
 }
 
 // Non-mutating: reports OK/ERROR per check and exits non-zero if any failed.

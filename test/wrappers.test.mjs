@@ -734,6 +734,18 @@ test("restore rejects a directory outside the managed backup root", () => {
   assert.match(result.stderr, /Refusing backup outside/);
 });
 
+test("setup ends by pointing at the agent usage snippet and writes no agent instruction file", () => {
+  const fixture = installerFixture("multi-account-install-agent-usage-");
+  const lines = execFileSync(cli, ["setup"], { encoding: "utf8", env: fixture.env }).trimEnd().split("\n");
+  const snippet = path.join(toolDir, "docs", "agent-usage.md");
+
+  assert.ok(lines.at(-1).includes(snippet), lines.at(-1));
+  assert.equal(fs.existsSync(snippet), true);
+  for (const name of ["CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".cursor"]) {
+    assert.equal(fs.existsSync(path.join(fixture.home, name)), false, name);
+  }
+});
+
 test("installer dry-run does not write to HOME", () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-install-dry-"));
   const result = execFileSync(cli, ["setup", "--dry-run"], {
