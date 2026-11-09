@@ -36,10 +36,6 @@ A refusal is deliberate. Stop, quote it to the user, and let them decide. Except
 (`GH_REPO`, `--repo`, remote URL), never the echoed value, which can contain a credential
 (e.g. `user:token@host/org/repo`):
 
-```bash
-gh pr list --repo unlisted-org/x   # exit 5: GitHub account is not allow-listed: unlisted-org
-```
-
 | Message | Meaning |
 |---|---|
 | `GitHub account is not allow-listed: <owner>` | `gh` exit 5 (4 if the config sets `exitCodes: "gh"`); the real `gh` did not run. `identity.sh` exit 2. The owner is not in the config and `onMissingCredential` is `block`. |
