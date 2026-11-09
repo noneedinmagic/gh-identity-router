@@ -133,7 +133,7 @@ function git(args, okStatuses = [0]) {
   return result.stdout;
 }
 
-const gitGlobal = (args, okStatuses) => git(["config", "--global", ...args], okStatuses);
+const gitConfigGlobal = (args, okStatuses) => git(["config", "--global", ...args], okStatuses);
 const splitNul = (text) => text.split("\0").slice(0, -1);
 const escapeRegex = (text) => text.replace(/[.[\]{}()*+?^$|\\]/g, "\\$&");
 
@@ -250,7 +250,7 @@ export function planIncludes(config, gitDir) {
 
 // Include entries this tool owns: any whose path lives in its own fragment directory.
 function managedIncludes(l) {
-  const out = gitGlobal(["--null", "--get-regexp", "^includeif\\..*\\.path$"], [0, 1]);
+  const out = gitConfigGlobal(["--null", "--get-regexp", "^includeif\\..*\\.path$"], [0, 1]);
 
   return splitNul(out)
     .map((entry) => ({ key: entry.slice(0, entry.indexOf("\n")), value: entry.slice(entry.indexOf("\n") + 1) }))
@@ -259,7 +259,7 @@ function managedIncludes(l) {
 
 function pruneIncludes(l) {
   for (const { key, value } of managedIncludes(l)) {
-    gitGlobal(["--unset-all", key, `^${escapeRegex(value)}$`], [0, 5]);
+    gitConfigGlobal(["--unset-all", key, `^${escapeRegex(value)}$`], [0, 5]);
   }
 
   fs.rmSync(l.gitDir, { recursive: true, force: true });
@@ -274,7 +274,7 @@ function applyIncludes(l, plan) {
     git(["config", "--file", fragment, "user.name", name]);
     git(["config", "--file", fragment, "user.email", email]);
     for (const key of includeKeys(owner)) {
-      gitGlobal(["--add", key, fragment]);
+      gitConfigGlobal(["--add", key, fragment]);
     }
   }
 }
@@ -299,7 +299,7 @@ function createBackup(l) {
   }
 
   for (const [name, key] of Object.entries(GIT_KEYS)) {
-    fs.writeFileSync(path.join(dir, "git-config", `${name}.values`), gitGlobal(["--null", "--get-all", key], [0, 1]));
+    fs.writeFileSync(path.join(dir, "git-config", `${name}.values`), gitConfigGlobal(["--null", "--get-all", key], [0, 1]));
   }
 
   fs.writeFileSync(path.join(dir, "include-entries.json"), JSON.stringify(managedIncludes(l)));
@@ -390,9 +390,9 @@ function restoreBackup(l, selected) {
   }
 
   for (const [name, key] of Object.entries(GIT_KEYS)) {
-    gitGlobal(["--unset-all", key], [0, 5]);
+    gitConfigGlobal(["--unset-all", key], [0, 5]);
     for (const value of splitNul(fs.readFileSync(path.join(dir, "git-config", `${name}.values`), "utf8"))) {
-      gitGlobal(["--add", key, value]);
+      gitConfigGlobal(["--add", key, value]);
     }
   }
 
@@ -401,7 +401,7 @@ function restoreBackup(l, selected) {
     fs.cpSync(path.join(dir, "include-fragments"), l.gitDir, { recursive: true });
   }
   for (const { key, value } of includes) {
-    gitGlobal(["--add", key, value]);
+    gitConfigGlobal(["--add", key, value]);
   }
 
   return dir;
@@ -546,11 +546,11 @@ function setup({ dryRun, verify, node }) {
 
     const helper = path.join(l.bin, "git-credential-gh-identity-router");
 
-    gitGlobal(["--unset-all", GIT_KEYS.helper], [0, 5]);
-    gitGlobal(["--add", GIT_KEYS.helper, ""]);
-    gitGlobal(["--add", GIT_KEYS.helper, helper]);
-    gitGlobal([GIT_KEYS.username, "x-access-token"]);
-    gitGlobal([GIT_KEYS["use-http-path"], "true"]);
+    gitConfigGlobal(["--unset-all", GIT_KEYS.helper], [0, 5]);
+    gitConfigGlobal(["--add", GIT_KEYS.helper, ""]);
+    gitConfigGlobal(["--add", GIT_KEYS.helper, helper]);
+    gitConfigGlobal([GIT_KEYS.username, "x-access-token"]);
+    gitConfigGlobal([GIT_KEYS["use-http-path"], "true"]);
     applyIncludes(l, includes);
     probeIncludes(includes);
 
@@ -614,7 +614,7 @@ function verifyInstall({ l, launcher, configPath, verifyCommand, includes }) {
   check("gh on PATH is the installed wrapper", () => checkGhOnPath(path.join(l.bin, "gh")));
   check("git credential settings", () => {
     const helper = path.join(l.bin, "git-credential-gh-identity-router");
-    const values = (key) => splitNul(gitGlobal(["--null", "--get-all", key], [0, 1]));
+    const values = (key) => splitNul(gitConfigGlobal(["--null", "--get-all", key], [0, 1]));
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
     return same(values(GIT_KEYS.helper), ["", helper])
