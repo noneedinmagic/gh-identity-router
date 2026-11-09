@@ -310,6 +310,12 @@ credential.https://github.com.useHttpPath=true
 That setting allows `your-org/repository.git` and `your-user/repository.git` to
 select different installations.
 
+`setup` ends by printing the path of [`docs/agent-usage.md`](docs/agent-usage.md), a short
+snippet to paste into your coding agent's instruction file (`CLAUDE.md`, `AGENTS.md`, Cursor
+rules). It teaches the agent when to pass `-R`/`GH_REPO`, how to produce the PR footer, and
+to stop and report a refusal instead of working around it. `setup` never writes into those
+files itself.
+
 ## Selection behavior
 
 For `gh`, selection order is:
