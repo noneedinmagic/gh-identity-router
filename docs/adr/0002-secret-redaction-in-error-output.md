@@ -8,8 +8,8 @@ transcripts and CI logs, and the value can hold a credential. A config setting d
 how much of the value the message repeats. The setting is `secretRedaction: "whole-value"
 | "detected"`, at the top level only, and with it unset the answer is `whole-value`.
 
-- **`whole-value`** replaces the whole value with `[redacted]`. Nothing the user supplied
-  is repeated, whatever its shape.
+- **`whole-value`** replaces the whole value with `[redacted]`. Nothing of a value that
+  failed to parse is repeated, whatever its shape.
 - **`detected`** replaces only the parts that match a known secret shape and echoes the
   rest: the userinfo of a `scheme://` URL, a query string or fragment, the text before
   the last `@` in a scheme-less value's first `/`-segment, and any run that starts with a
@@ -31,9 +31,10 @@ never more. A message that cannot read the config, such as `mint-dispatch-token`
 argument check, repeats nothing.
 
 Without the value, the label is what tells the user where to look, so the label names
-what the user actually set: `--repo`, `GH_REPO`, `remote URL`, or `Git credential path`.
-Each label leads to the value with one command: the user's own command line,
-`echo "$GH_REPO"`, `git remote get-url origin`, or `git remote -v`.
+what the user actually set: `--repo`, `GH_REPO`, `remote URL`, `Git credential path`,
+`--account`, or `IDENTITY_ROUTER_ORG`. Each label leads to the value with one command: the
+user's own command line, `echo "$GH_REPO"`, `git remote get-url origin`, or
+`git remote -v`.
 
 ## Considered options
 
@@ -68,8 +69,11 @@ Each label leads to the value with one command: the user's own command line,
   (`SECRET/repo`) parses as an owner, and the allow-list error names it. It looks exactly
   like an owner name, and that error's job is to name the owner. A managed-user login
   that starts with a token prefix (`ghp_name`) cannot be routed.
-- **Every new message that repeats user input goes through the same redaction, or
-  repeats nothing.** A later change must not restore echoing by default, and must not add
-  a shape rule to `whole-value`: that mode's guarantee is that it needs none.
+- **Every new message that repeats a value it could not parse goes through the same
+  redaction, or repeats nothing.** The one deliberate exception is the allow-list error,
+  which names an owner that did parse: naming it is that message's job, and token-shaped
+  owners never get that far. A later change must not redact that owner, must not restore
+  echoing by default, and must not add a shape rule to `whole-value`: that mode's
+  guarantee is that it needs none.
 - The value is exact and case-sensitive. Any other value is rejected when the config is
   loaded.

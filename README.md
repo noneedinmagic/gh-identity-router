@@ -350,7 +350,8 @@ default account: it is blocked, unless the top-level `onMissingCredential` is `m
 parsed* — a `--repo owner` missing the `/repo` segment, a non-`github.com` host, an
 unparseable remote URL — is treated the same way: it fails rather than silently falling
 through to `defaultAccount`. The error names which selector failed (`--repo`, `GH_REPO`,
-`remote URL`, or `Git credential path` for the credential helper) and, because the value
+`remote URL`, `Git credential path` for the credential helper, or `--account` and
+`IDENTITY_ROUTER_ORG` for a token-shaped owner) and, because the value
 can carry a credential, shows the value as `[redacted]` by default. See `secretRedaction`
 under Configuration to echo it with only its detected secrets replaced.
 
