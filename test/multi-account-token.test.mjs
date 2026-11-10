@@ -20,6 +20,7 @@ import {
   parseRepositoriesArgument,
   parseRepositoryOwner,
   readPatToken,
+  redactSecrets,
   resolveAccount,
   validateAccountEntry,
   validateAppConfig,
@@ -107,38 +108,92 @@ test("onMissingCredential next to a credential block is rejected, not ignored", 
   );
 });
 
+// secretRedaction "detected" echoes a value with no secret shape in it, so these still
+// assert the offending string is named; the default hides it (next tests).
+const detected = { ...config, secretRedaction: "detected" };
+
 test("fails closed on a --repo value missing the /repo segment, naming the string", () => {
   assert.throws(
-    () => resolveAccount(config, { repository: "example-org" }),
+    () => resolveAccount(detected, { repository: "example-org" }),
     /Could not parse a GitHub owner from --repo: example-org/
   );
 });
 
 test("fails closed on a non-github.com remote URL, naming the string", () => {
   assert.throws(
-    () => resolveAccount(config, { remoteUrl: "https://gitlab.com/example-org/repo" }),
+    () => resolveAccount(detected, { remoteUrl: "https://gitlab.com/example-org/repo" }),
     /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/example-org\/repo/
   );
 });
 
 test("fails closed on a bare HOST/OWNER/REPO selector for a non-github.com host", () => {
   assert.throws(
-    () => resolveAccount(config, { repository: "gitlab.com/example-org/repo" }),
+    () => resolveAccount(detected, { repository: "gitlab.com/example-org/repo" }),
     /Could not parse a GitHub owner from --repo: gitlab\.com\/example-org\/repo/
   );
 });
 
 test("redacts embedded credentials from an unparseable selector's error message", () => {
   assert.throws(
-    () => resolveAccount(config, { remoteUrl: "https://x-access-token:ghp_secret@gitlab.com/example-org/repo" }),
+    () => resolveAccount(detected, { remoteUrl: "https://x-access-token:ghp_secret@gitlab.com/example-org/repo" }),
     (error) => {
-      assert.match(error.message, /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/example-org\/repo/);
+      assert.match(error.message, /Could not parse a GitHub owner from remote URL: https:\/\/\[redacted\]@gitlab\.com\/example-org\/repo/);
       assert.doesNotMatch(error.message, /ghp_secret/);
       assert.doesNotMatch(error.message, /x-access-token/);
 
       return true;
     }
   );
+});
+
+test("by default an unparseable selector's whole value is replaced, whatever its shape", () => {
+  for (const value of ["example-org", "ghp_abc123", "x-access-token:s3cret@gitlab.com/org/repo"]) {
+    assert.throws(
+      () => resolveAccount(config, { repository: value }),
+      (error) => error.message === "Could not parse a GitHub owner from --repo: [redacted]",
+      value
+    );
+  }
+});
+
+test("a token-shaped owner is unparseable, so the allow-list error never echoes it", () => {
+  for (const [selectors, label] of [
+    [{ repository: "ghp_AbCd123/repo" }, "--repo"],
+    [{ remoteUrl: "https://github.com/github_pat_11AB/repo" }, "remote URL"],
+    [{ account: "ghp_AbCd123" }, "--account"],
+    [{ environmentAccount: "gho_AbCd123" }, "IDENTITY_ROUTER_ORG"]
+  ]) {
+    assert.throws(
+      () => resolveAccount(config, selectors),
+      (error) => error.message === `Could not parse a GitHub owner from ${label}: [redacted]`,
+      label
+    );
+  }
+});
+
+test("secretRedaction detected replaces each known secret shape and echoes the rest", () => {
+  for (const [value, expected] of [
+    ["https://u:tok@gitlab.com/o/r", "https://[redacted]@gitlab.com/o/r"],
+    ["https://user:pa?ss@gitlab.com/o/r", "https://[redacted]@gitlab.com/o/r"],
+    ["https://gitlab.com/o/r?access_token=tok#frag", "https://gitlab.com/o/r?[redacted]#[redacted]"],
+    ["x-access-token:tok@gitlab.com/o/r", "[redacted]@gitlab.com/o/r"],
+    ["ghp_abc123", "[redacted]"],
+    ["https://host/github_pat_11AB_cd/r", "https://host/[redacted]/r"],
+    [" \thttps://u:tok@gitlab.com/o/r", "https://[redacted]@gitlab.com/o/r"],
+    ["a#b\ntok", "a#[redacted]"],
+    ["acme\u001b[31m", "acme?[31m"],
+    ["acme", "acme"]
+  ]) {
+    assert.equal(redactSecrets(value, "detected"), expected, value);
+  }
+});
+
+test("secretRedaction rejects an unknown mode instead of defaulting", () => {
+  for (const value of ["detect", "Whole-value", "none", true]) {
+    assert.throws(() => validateConfig({ ...rawConfig, secretRedaction: value }), /Config field secretRedaction must be whole-value or detected/, String(value));
+  }
+
+  assert.equal(validateConfig({ ...rawConfig, secretRedaction: "detected" }).secretRedaction, "detected");
 });
 
 test("falls through to the next selector when repository/remoteUrl are simply absent", () => {

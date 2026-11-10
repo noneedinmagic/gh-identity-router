@@ -16,6 +16,14 @@ _Avoid_: org (when a user is meant), account (ambiguous with the acting login)
 An owner with no entry in the config's `accounts` — situation (b).
 _Avoid_: unknown account, non-allow-listed account
 
+**Selector**:
+A value the router reads to decide the owner of an operation: the `--repo` argument,
+`GH_REPO`, the clone's `origin` URL, or the path Git hands the credential helper.
+
+**Unparseable selector**:
+A selector that was supplied but names no github.com owner; it fails closed rather than
+falling through to the next selector.
+
 **Unresolved owner**:
 The case where no owner can be determined for an operation (no repository, remote or
 override names one) — situation (c).
@@ -62,3 +70,18 @@ _Avoid_: deny, fail-closed (as a value name)
 A refusal this tool enforces on the paths it controls, which a direct `gh`, an SSH remote
 or another credential helper can still bypass — not a security boundary.
 _Avoid_: lockout, enforcement
+
+### Error output
+
+**Secret redaction**:
+How much of an unparseable selector an error message may repeat: `whole-value` (none of
+it) or `detected` (all but the parts that look like a secret). It is a ceiling: a message
+may repeat less, never more.
+_Avoid_: masking, scrubbing
+
+**whole-value**:
+The secret redaction that replaces the whole value with `[redacted]`; the default.
+
+**detected**:
+The secret redaction that replaces only the parts matching a known secret shape and
+repeats the rest.

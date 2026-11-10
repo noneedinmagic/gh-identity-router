@@ -308,9 +308,9 @@ test("an unparseable GH_REPO refuses the footer, names GH_REPO, and --check agre
 
   assert.equal(footer.status, 2);
   assert.equal(footer.stdout, "");
-  assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: acme/);
+  assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
   assert.equal(check.status, 2);
-  assert.match(check.stderr, /Could not parse a GitHub owner from GH_REPO: acme/);
+  assert.match(check.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
 });
 
 test("GH_REPO unset and an unparseable origin refuses the footer and names the remote URL", () => {
@@ -319,7 +319,7 @@ test("GH_REPO unset and an unparseable origin refuses the footer and names the r
 
   assert.equal(footer.status, 2);
   assert.equal(footer.stdout, "");
-  assert.match(footer.stderr, /Could not parse a GitHub owner from remote URL: https:\/\/gitlab\.com\/acme\/repo/);
+  assert.match(footer.stderr, /Could not parse a GitHub owner from remote URL: \[redacted\]/);
 });
 
 test("credentials in an unparseable origin are redacted from the footer's error", () => {
@@ -328,15 +328,26 @@ test("credentials in an unparseable origin are redacted from the footer's error"
 
   assert.equal(footer.status, 2);
   assert.equal(footer.stdout, "");
-  assert.match(footer.stderr, /remote URL: https:\/\/gitlab\.com\/acme\/repo/);
+  assert.match(footer.stderr, /remote URL: \[redacted\]/);
   assert.doesNotMatch(footer.stderr, /s3cret/);
 });
 
-// Known gap: a scheme-less selector slips past redactCredentials, which only understands
-// URLs and `://` userinfo. Becomes a normal test when that is fixed.
-test("a scheme-less GH_REPO carrying credentials is not echoed in the footer's error", { todo: true }, () => {
+test("a token pasted as the owner in GH_REPO is not echoed by the footer's refusal", () => {
+  const footer = unparseableFixture().footer({ GH_REPO: "ghp_s3cret/repo" });
+
+  assert.equal(footer.status, 2);
+  assert.equal(footer.stdout, "");
+  assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
+  assert.doesNotMatch(footer.stderr, /s3cret/);
+});
+
+// A scheme-less value is no URL, so no URL-based redaction sees its userinfo; the default
+// secretRedaction hides the whole value instead (docs/adr/0002).
+test("a scheme-less GH_REPO carrying credentials is not echoed in the footer's error", () => {
   const footer = unparseableFixture().footer({ GH_REPO: "x-access-token:s3cret@host/org/repo" });
 
   assert.equal(footer.status, 2);
+  assert.equal(footer.stdout, "");
+  assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
   assert.doesNotMatch(footer.stderr, /s3cret/);
 });

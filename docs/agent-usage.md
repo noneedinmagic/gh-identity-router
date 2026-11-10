@@ -33,8 +33,8 @@ GH_REPO=other-org/x identity.sh --footer >> body.md && gh pr create --repo other
 
 A refusal is deliberate. Stop, quote it to the user, and let them decide. Exception: for
 `Could not parse a GitHub owner from …`, quote only that prefix and which selector it names
-(`GH_REPO`, `--repo`, remote URL), never the echoed value, which can contain a credential
-(e.g. `user:token@host/org/repo`):
+(`GH_REPO`, `--repo`, remote URL, Git credential path), never the echoed value, which can
+contain a credential (e.g. `user:token@host/org/repo`):
 
 | Message | Meaning |
 |---|---|
