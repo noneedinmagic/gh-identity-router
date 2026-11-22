@@ -413,10 +413,11 @@ through `hasconfig:remote.*.url`.
 
 The credential helper mints the token before printing anything. If minting fails, the
 owner is blocked, or the token command exits 0 but prints nothing, the helper answers only
-`quit=1`. Git then stops with "credential
-helper ... told us to quit" instead of asking a later helper or prompting for a password.
-The reason is on the line above it, from the token command's stderr. Every GitHub API request made while minting a
-token times out after 10 seconds rather than hanging on a stalled connection.
+`quit=1`. Git then stops with "credential helper ... told us to quit" instead of asking a
+later helper or prompting for a password. The reason is on the line above it, on stderr:
+from the token command, or from the helper itself for an empty token. Every GitHub API
+request made while minting a token times out after 10 seconds rather than hanging on a
+stalled connection.
 
 The `gh` wrapper refuses an empty token the same way: it prints an error and exits 1
 without running the real `gh`, because `gh` treats an empty `GH_TOKEN` as unset and would
