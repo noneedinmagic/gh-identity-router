@@ -199,6 +199,18 @@ mkdir -p "$tmp/link-a" "$tmp/link-b"
 ln -s "$SCRIPT" "$tmp/link-a/identity.sh"
 ln -s ../link-a/identity.sh "$tmp/link-b/identity.sh"
 link_out="$("$tmp/link-b/identity.sh" --self-check 2>&1)" || fail "symlinked identity.sh failed: $link_out"
+assert_contains "$link_out" "self-check: all passed"
 echo "OK: shim resolves src/identity.mjs through a chained symlink"
+
+# A symlinked *directory* hands Node a non-real path. With no config, --check must refuse
+# (exit 2), not fall silent and exit 0 because main() was skipped.
+ln -s "$ROOT" "$tmp/root-link"
+set +e
+dir_link_out="$(cd "$proj" && HOME="$fake_home" AGENT_IDENTITY_GH_BIN="$tmp/no-such-gh-binary" IDENTITY_ROUTER_CONFIG="$tmp/no-such-config.json" "$tmp/root-link/bin/identity.sh" --check 2>&1)"
+dir_link_rc=$?
+set -e
+assert_eq "$dir_link_rc" 2
+assert_contains "$dir_link_out" "REFUSED"
+echo "OK: --check refuses, rather than passing silently, through a symlinked directory"
 
 echo "all identity.sh / pre-push checks passed"

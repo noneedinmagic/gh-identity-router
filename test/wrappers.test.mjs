@@ -373,6 +373,25 @@ test("gh wrapper still fails closed on any other token command failure", () => {
   assert.equal(fs.existsSync(logPath), false);
 });
 
+test("gh wrapper fails rather than running the real gh when the token command prints nothing", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-gh-empty-token-"));
+  const logPath = path.join(tempDir, "log");
+  const tokenCommand = path.join(tempDir, "token");
+  const ghCommand = path.join(tempDir, "gh-real");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nprintf ''\n");
+  executable(ghCommand, `#!/usr/bin/env bash\necho ran >>"${logPath}"\n`);
+
+  const result = spawnSync(path.join(toolDir, "bin", "gh"), ["pr", "list", "--repo", "example-org/repo"], {
+    encoding: "utf8",
+    env: { ...process.env, IDENTITY_ROUTER_REAL_GH: ghCommand, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /empty token/);
+  assert.equal(fs.existsSync(logPath), false);
+});
+
 test("gh wrapper passes a blocked owner's exit code through without running the real gh", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-gh-blocked-"));
   const logPath = path.join(tempDir, "log");
@@ -404,6 +423,22 @@ test("Git credential helper answers quit=1 for a blocked owner", () => {
   });
 
   assert.equal(result.stdout, "quit=1\n");
+});
+
+test("Git credential helper answers only quit=1 when the token command prints nothing", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-credential-empty-token-"));
+  const tokenCommand = path.join(tempDir, "token");
+
+  executable(tokenCommand, "#!/usr/bin/env bash\nprintf ''\n");
+  const result = spawnSync(path.join(toolDir, "bin", "git-credential-gh-identity-router"), ["get"], {
+    input: "protocol=https\nhost=github.com\npath=example-org/repo.git\n\n",
+    encoding: "utf8",
+    env: { ...process.env, IDENTITY_ROUTER_TOKEN_COMMAND: tokenCommand }
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "quit=1\n");
+  assert.match(result.stderr, /empty token/);
 });
 
 // Git ignores a helper's exit code and moves on to the next helper or a prompt; only
@@ -892,6 +927,24 @@ test("the installed multi-account-token launcher works with no node on PATH", ()
   const result = spawnSync(launcher, ["--repo", "plain-org/x"], { encoding: "utf8", env });
   assert.equal(result.status, 3, result.stdout + result.stderr);
   assert.match(result.stderr, /has no credential block/);
+});
+
+// The launcher execs the installed script by its $HOME spelling; with a symlinked HOME
+// (a dotfile manager, a home on a symlinked mount) that is not the real path.
+test("the installed multi-account-token launcher runs main() under a symlinked HOME", () => {
+  const fixture = installerFixture("multi-account-launcher-symlink-home-");
+  const linkedHome = `${fixture.home}-link`;
+
+  fs.symlinkSync(fixture.home, linkedHome);
+
+  const env = { ...fixture.env, HOME: linkedHome };
+
+  execFileSync(cli, ["setup"], { env });
+
+  const result = spawnSync(path.join(linkedHome, ".local", "bin", "multi-account-token"), ["--bogus"], { encoding: "utf8", env });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unknown argument: --bogus/);
 });
 
 test("setup bakes a node path that needs shell quoting", () => {
