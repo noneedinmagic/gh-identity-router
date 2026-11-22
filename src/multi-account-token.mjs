@@ -21,6 +21,24 @@ export function checkNodeVersion(nodeVersion, minMajor = MIN_NODE_MAJOR) {
   return null;
 }
 
+// Node realpaths the main module before it builds import.meta.url, but process.argv[1]
+// keeps the spelling the process was launched with. A symlink anywhere in that path (a
+// symlinked directory or HOME, a dotfile manager) makes the two differ, so compare real
+// paths on both sides. An argv[1] that is absent (`node -e`) or does not resolve means
+// "not the entry point", never an exception. import.meta.main would do this on Node 24.2+
+// only, and this package supports Node 20.
+export function isMainModule(moduleUrl, argv1 = process.argv[1]) {
+  if (!argv1) {
+    return false;
+  }
+
+  try {
+    return fs.realpathSync(fileURLToPath(moduleUrl)) === fs.realpathSync(argv1);
+  } catch {
+    return false;
+  }
+}
+
 function fail(message) {
   throw new Error(message);
 }
@@ -986,10 +1004,7 @@ async function printToken(config, { repositoryLabel, ...args }) {
   process.stdout.write(token);
 }
 
-const isEntrypoint = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isEntrypoint) {
+if (isMainModule(import.meta.url)) {
   const nodeVersionError = checkNodeVersion(process.versions.node);
 
   if (nodeVersionError) {

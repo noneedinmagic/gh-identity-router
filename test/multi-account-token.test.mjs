@@ -13,6 +13,7 @@ import {
   classifyInstallations,
   createAppJwt,
   fallsBackToMachine,
+  isMainModule,
   listAppInstallations,
   mintInstallationToken,
   parseArguments,
@@ -991,4 +992,25 @@ test("bootstrap.example.json validates as a discovery bootstrap config", () => {
     appId: "123456",
     privateKeyPath: "/home/USER/.config/gh-identity-router/private-key.pem"
   });
+});
+
+// Node realpaths the main module, but argv[1] keeps the launch spelling; a symlinked
+// directory used to make main() silently skip and the process exit 0.
+test("multi-account-token runs main() when launched through a symlinked directory", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-account-token-symlink-"));
+  const link = path.join(dir, "src-link");
+
+  fs.symlinkSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src"), link);
+
+  const result = spawnSync(process.execPath, [path.join(link, "multi-account-token.mjs"), "--bogus"], { encoding: "utf8" });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unknown argument: --bogus/);
+});
+
+test("isMainModule is false, without throwing, when argv[1] is missing or does not resolve", () => {
+  assert.equal(isMainModule(import.meta.url, null), false);
+  assert.equal(isMainModule(import.meta.url, ""), false);
+  assert.equal(isMainModule(import.meta.url, path.join(os.tmpdir(), "no-such-entrypoint.mjs")), false);
+  assert.equal(isMainModule(import.meta.url, fileURLToPath(import.meta.url)), true);
 });

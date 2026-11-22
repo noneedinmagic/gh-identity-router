@@ -53,4 +53,9 @@ if ((token_status == 3)); then
   exec "$real_gh" "$@"
 fi
 ((token_status == 0)) || exit "$token_status"
+# An empty GH_TOKEN reads as unset to gh, which would then use its own stored login.
+if [[ -z "$token" ]]; then
+  echo "gh-identity-router: token command returned an empty token" >&2
+  exit 1
+fi
 GH_TOKEN="$token" exec "$real_gh" "$@"

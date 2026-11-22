@@ -28,10 +28,8 @@
 
 import os from "node:os";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
 
-import { checkNodeVersion, fallsBackToMachine, loadRawConfig, resolveAccount, validateConfig } from "./multi-account-token.mjs";
+import { checkNodeVersion, fallsBackToMachine, isMainModule, loadRawConfig, resolveAccount, validateConfig } from "./multi-account-token.mjs";
 
 const GH_AUTH_STATUS_TIMEOUT_MS = 10_000;
 
@@ -522,10 +520,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   return state.status;
 }
 
-const isEntrypoint = process.argv[1]
-  && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-
-if (isEntrypoint) {
+if (isMainModule(import.meta.url)) {
   const nodeVersionError = checkNodeVersion(process.versions.node);
 
   if (nodeVersionError) {
