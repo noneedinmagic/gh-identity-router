@@ -200,9 +200,10 @@ export function resolveIdentityAccount(env = process.env) {
 
 // footerHost is the one identity field where "absent" and "present but empty" mean
 // different things (fall back to `os.hostname()` vs. suppress the host from the footer
-// entirely).
+// entirely). Callers only pass an applying identity: with none, there is no footer to
+// describe and no reason to read the machine hostname.
 function footerHostOf(identity) {
-  return identity?.footerHost === undefined ? os.hostname() : identity.footerHost;
+  return identity.footerHost === undefined ? os.hostname() : identity.footerHost;
 }
 
 export function resolve({ runtimeOverride = "", env = process.env, ghBin } = {}) {
@@ -231,7 +232,7 @@ export function resolve({ runtimeOverride = "", env = process.env, ghBin } = {})
     owner: account?.name ?? "",
     refusal,
     identity,
-    host: footerHostOf(identity),
+    host: identity ? footerHostOf(identity) : "",
     runtime,
     derivedRaw,
     derived,
@@ -259,7 +260,9 @@ export function printBlock(state) {
 
   lines.push(`derived:  ${state.derivedRaw}`);
 
-  if (state.host) {
+  if (!state.identity) {
+    lines.push("host:     (no identity applies)");
+  } else if (state.host) {
     lines.push(`host:     ${state.host}`);
   } else {
     lines.push("host:     (suppressed — footerHost is empty)");
