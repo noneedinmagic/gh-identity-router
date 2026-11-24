@@ -24,12 +24,26 @@ const SOURCE_FILES = [
 // surface, so they need naming here rather than being caught by the prefix check.
 const KNOWN_VARS = new Set(["GH_REPO", "GH_TOKEN", "DISPATCH_GH_TOKEN"]);
 
+// Prefixes whose variables the agent runtime sets and the tool reads (runtime detection,
+// session id, bridge signals) — a new one in source must be documented too.
+const RUNTIME_PREFIXES = ["CLAUDE_CODE_", "CODEX_", "AI_AGENT"];
+
+// Deliberately NOT collected: HOME, PWD and PATH. They're shell-provided on every POSIX
+// system (not this tool's config surface or its runtime's), and docs/env-vars.md says so.
+// None carries one of the prefixes above, so no explicit filter is needed — a new
+// shell-provided variable would have to be added to KNOWN_VARS to be checked.
+
 function varsReferencedIn(file) {
   const text = fs.readFileSync(path.join(ROOT, file), "utf8");
   const found = new Set();
   for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
     const name = m[1];
-    if (name.startsWith("IDENTITY_ROUTER_") || name.startsWith("AGENT_IDENTITY_") || KNOWN_VARS.has(name)) {
+    // A trailing `_` is a prefix glob in a comment (CLAUDE_CODE_BRIDGE_OWNER_*_UUID), not a variable.
+    if (name.endsWith("_")) continue;
+    if (
+      name.startsWith("IDENTITY_ROUTER_") || name.startsWith("AGENT_IDENTITY_")
+      || RUNTIME_PREFIXES.some((p) => name.startsWith(p)) || KNOWN_VARS.has(name)
+    ) {
       found.add(name);
     }
   }
