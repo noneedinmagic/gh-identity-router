@@ -15,7 +15,6 @@ const SUBPROCESS_TIMEOUT_MS = 30_000;
 // Live verification makes several GitHub API calls; each already has its own timeout.
 const VERIFY_TIMEOUT_MS = 300_000;
 const MANIFEST = "gh-identity-router-backup-v1";
-const LEGACY_MANIFEST = "gh-multi-account-backup-v1";
 const GIT_KEYS = {
   helper: "credential.https://github.com.helper",
   username: "credential.https://github.com.username",
@@ -38,16 +37,13 @@ function layout(home) {
     bin: path.join(home, ".local", "bin"),
     share,
     gitDir: path.join(share, "git"),
-    legacyShare: path.join(home, ".local", "share", "gh-multi-account"),
-    state: path.join(home, ".local", "state", "gh-identity-router"),
-    legacyState: path.join(home, ".local", "state", "gh-multi-account")
+    state: path.join(home, ".local", "state", "gh-identity-router")
   };
 }
 
 // `src` is a path inside the package; a target without one is generated (the launcher).
-// `legacy` is where a pre-rename backup put the target; `legacyOptional` targets were
-// added after backup format v1 shipped, so older backups have no state for them and
-// restore treats that as "was absent".
+// `legacyOptional` targets were added after backup format v1 shipped, so older backups
+// have no state for them and restore treats that as "was absent".
 // ponytail: a damaged new backup missing these entries also reads as absent; add a
 // per-backup target list to the manifest if that ever matters.
 function targets(l) {
@@ -58,23 +54,20 @@ function targets(l) {
       name: "bin-credential",
       path: path.join(l.bin, "git-credential-gh-identity-router"),
       src: "bin/git-credential-gh-identity-router",
-      mode: 0o755,
-      legacy: path.join(l.bin, "multi-account-git-credential")
+      mode: 0o755
     },
     { name: "bin-mint-dispatch-token", path: path.join(l.bin, "mint-dispatch-token"), src: "bin/mint-dispatch-token", mode: 0o755 },
     {
       name: "share-token",
       path: path.join(l.share, "multi-account-token.mjs"),
       src: "src/multi-account-token.mjs",
-      mode: 0o755,
-      legacy: path.join(l.legacyShare, "multi-account-token.mjs")
+      mode: 0o755
     },
     {
       name: "share-example",
       path: path.join(l.share, "config.example.json"),
       src: "config.example.json",
-      mode: 0o644,
-      legacy: path.join(l.legacyShare, "config.example.json")
+      mode: 0o644
     },
     { name: "bin-identity", path: path.join(l.bin, "identity.sh"), src: "bin/identity.sh", mode: 0o755, legacyOptional: true },
     {
@@ -82,7 +75,6 @@ function targets(l) {
       path: path.join(l.share, "identity.mjs"),
       src: "src/identity.mjs",
       mode: 0o644,
-      legacy: path.join(l.legacyShare, "identity.mjs"),
       legacyOptional: true
     }
   ];
@@ -329,7 +321,7 @@ function resolveBackupDir(l, selected) {
   }
 
   const resolved = fs.realpathSync(selected);
-  const roots = [path.join(l.state, "backups"), path.join(l.legacyState, "backups")]
+  const roots = [path.join(l.state, "backups")]
     .filter(exists)
     .map((root) => fs.realpathSync(root));
 
@@ -357,7 +349,7 @@ function restoreBackup(l, selected) {
   const manifestPath = path.join(dir, "manifest.version");
   const manifest = exists(manifestPath) ? fs.readFileSync(manifestPath, "utf8").trim() : "";
 
-  if (manifest !== MANIFEST && manifest !== LEGACY_MANIFEST) {
+  if (manifest !== MANIFEST) {
     fail(`Invalid gh-identity-router backup: ${dir}`);
   }
 
@@ -376,10 +368,7 @@ function restoreBackup(l, selected) {
       fail(`Backup is missing file state for ${target.name}`);
     }
 
-    // A pre-rename backup kept the renamed targets at their old paths.
-    const dest = manifest === LEGACY_MANIFEST ? (target.legacy ?? target.path) : target.path;
-
-    return { stored, present, dest };
+    return { stored, present, dest: target.path };
   });
 
   for (const name of Object.keys(GIT_KEYS)) {

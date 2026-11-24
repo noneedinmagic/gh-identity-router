@@ -2,21 +2,10 @@
 
 > **Pre-release.** v0.1 is not yet published. The `bin`/`src` layout, config schema,
 > and environment variable names described here reflect this repo's *current*
-> behavior (extracted from an earlier, private tool) and are expected to change
-> before the first npm release. See open issues for what's planned. APIs and schema
-> may change without notice until v0.1 ships.
+> behavior and are expected to change before the first npm release. See open issues for
+> what's planned. APIs and schema may change without notice until v0.1 ships.
 >
-> Upgrading from the earlier `gh-multi-account` names: env vars are now
-> `IDENTITY_ROUTER_*`, state lives under `gh-identity-router/` directories
-> (`~/.config`, `~/.local/share`, `~/.local/state`), and the Git credential helper is
-> `git-credential-gh-identity-router`. Move your old config directory over, then
-> update the absolute `privateKeyPath` and any PAT `tokenPath` values in its
-> `config.json` (they still point under `~/.config/gh-multi-account`), e.g.
-> `sed -i 's#/gh-multi-account/#/gh-identity-router/#g' ~/.config/gh-identity-router/config.json`.
-> Then re-run `gh-identity-router setup`; remove the stale `~/.local/bin/multi-account-git-credential`
-> by hand.
->
-> The account entry schema also changed: App/PAT settings now live in a per-entry
+> The account entry schema changed: App/PAT settings now live in a per-entry
 > `credential` block (no top-level `appId`/`privateKeyPath`, no flat `type`,
 > `installationId`, or `tokenPath`), and the per-`$HOME` `~/.agent-identity` file is
 > retired in favor of an optional per-entry `identity` block. A config in the old shape
@@ -499,8 +488,7 @@ it, run `uninstall --backup` with your oldest backup under
 backup instead (for example the one `setup` printed).
 
 Restore accepts only a valid manifest below the current home's managed backup root.
-Backups taken before the rename (under `~/.local/state/gh-multi-account/backups`) are
-also accepted and restore the old helper and share-directory paths. It does not change
+It does not change
 the live config or private key. npm has no uninstall hook, so removing the package does
 not undo `setup`; run `uninstall` first.
 

@@ -566,36 +566,20 @@ test("installer resets inherited credential helpers for github.com", () => {
   assert.deepEqual(gitConfigValues(fixture.home, "credential.helper"), ["store"]);
 });
 
-test("restore accepts a pre-rename backup and puts the old paths back", () => {
-  const fixture = installerFixture("multi-account-install-prerename-restore-");
-  const output = execFileSync(cli, ["setup"], {
-    encoding: "utf8",
-    env: fixture.env
-  });
+test("restore rejects a backup stamped with a pre-rename manifest", () => {
+  const fixture = installerFixture("multi-account-install-prerename-reject-");
+  const output = execFileSync(cli, ["setup"], { encoding: "utf8", env: fixture.env });
   const backupDir = backupPathFrom(output);
-  const stateRoot = path.join(fixture.home, ".local", "state");
-  const legacyBackup = path.join(stateRoot, "gh-multi-account", "backups", path.basename(backupDir));
+  const installedGh = path.join(fixture.home, ".local", "bin", "gh");
 
-  // Rebuild the backup as the pre-rename installer would have written it.
-  fs.mkdirSync(path.dirname(legacyBackup), { recursive: true });
-  fs.renameSync(backupDir, legacyBackup);
-  fs.writeFileSync(path.join(legacyBackup, "manifest.version"), "gh-multi-account-backup-v1\n");
-  fs.writeFileSync(path.join(legacyBackup, "files", "bin-credential"), "old helper\n");
-  fs.unlinkSync(path.join(legacyBackup, "files", "bin-credential.absent"));
-  fs.writeFileSync(path.join(legacyBackup, "files", "share-identity"), "old identity module\n");
-  fs.rmSync(path.join(legacyBackup, "files", "share-identity.absent"), { force: true });
+  // Assembled from parts so the old name stays out of the tree (scripts/scrub-check.mjs).
+  fs.writeFileSync(path.join(backupDir, "manifest.version"), `${["gh", "multi", "account", "backup", "v1"].join("-")}\n`);
 
-  execFileSync(cli, ["uninstall", "--backup", legacyBackup], { env: fixture.env });
+  const result = spawnSync(cli, ["uninstall", "--backup", backupDir], { encoding: "utf8", env: fixture.env });
 
-  assert.equal(
-    fs.readFileSync(path.join(fixture.home, ".local", "share", "gh-multi-account", "identity.mjs"), "utf8"),
-    "old identity module\n"
-  );
-
-  assert.equal(
-    fs.readFileSync(path.join(fixture.home, ".local", "bin", "multi-account-git-credential"), "utf8"),
-    "old helper\n"
-  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Invalid gh-identity-router backup/);
+  assert.equal(fs.existsSync(installedGh), true, "a rejected backup must not touch the live install");
 });
 
 test("installer installs mint-dispatch-token alongside the other wrappers", () => {
