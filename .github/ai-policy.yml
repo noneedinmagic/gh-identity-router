@@ -75,11 +75,14 @@ backends:
 risk:
   # This tool mints and handles live GitHub credentials — everything that resolves,
   # signs, or mints a token, plus the installer/setup path, needs a human's eyes.
+  # package.json and test/** define what the required `test` check runs.
   human_required_paths:
     - src/**
     - bin/**
     - scripts/**
     - .github/**
+    - package.json
+    - test/**
   max_files_changed: 25
   max_lines_added: 600
   max_lines_deleted: 400
