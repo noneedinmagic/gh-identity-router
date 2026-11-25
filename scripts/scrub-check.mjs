@@ -24,7 +24,7 @@ const SELF = fileURLToPath(import.meta.url);
 const EXCLUDE_DIRS = new Set([".git", "node_modules", ".claude", ".worktrees"]);
 const EXCLUDE_FILES = new Set([SELF, join(ROOT, ".github", "ai-policy.yml")]);
 
-const PATTERN = /\b(normandy|tali|garrus|af24x|best-time(-biz)?|318730449|constitution)\b/i;
+const PATTERN = /\b(normandy|tali|garrus|af24x|best-time(-biz)?|318730449|constitution|gh-multi-account|multi-account-git-credential)\b/i;
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
