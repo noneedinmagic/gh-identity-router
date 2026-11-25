@@ -351,3 +351,34 @@ test("a scheme-less GH_REPO carrying credentials is not echoed in the footer's e
   assert.match(footer.stderr, /Could not parse a GitHub owner from GH_REPO: \[redacted\]/);
   assert.doesNotMatch(footer.stderr, /s3cret/);
 });
+
+// A refusal has no footer to describe, so its stderr block must never print the machine
+// hostname — least of all for users who set footerHost "" on every identity to keep it out
+// of transcripts and CI logs.
+test("a refusal with no applying identity never prints the machine hostname", () => {
+  const quiet = { login: "example-agent", footerHost: "" };
+  const f = fixture((tokenFile) => ({
+    "cred-org": { accountId: 1, targetType: "organization", credential: pat(tokenFile("cred-org")) },
+    "blocked-org": { accountId: 2, targetType: "organization", identity: quiet, onMissingCredential: "block" },
+    "quiet-org": { accountId: 3, targetType: "organization", credential: pat(tokenFile("quiet-org")), identity: quiet }
+  }), { defaultAccount: "quiet-org" });
+  const bare = (owner) => spawnSync(process.execPath, [identityScript], {
+    cwd: f.dir,
+    env: { ...process.env, HOME: f.dir, IDENTITY_ROUTER_CONFIG: path.join(f.dir, "config.json"), AGENT_IDENTITY_GH_BIN: path.join(f.dir, "gh-example_agent_bot_"), ...(owner ? { GH_REPO: `${owner}/repo` } : {}) },
+    encoding: "utf8"
+  });
+
+  for (const owner of ["unlisted-org", "blocked-org", "cred-org", undefined]) {
+    for (const [mode, result] of [["--footer", f.footer(owner)], ["--check", f.check(owner)], ["bare", bare(owner)]]) {
+      const label = `${owner ?? "no owner"} ${mode}`;
+
+      assert.equal(result.status, 2, label);
+      // The bare run prints its block on stdout; --footer and --check refuse via stderr.
+      const block = mode === "bare" ? result.stdout : result.stderr;
+
+      assert.equal(mode === "bare" ? "" : result.stdout, "", label);
+      assert.match(block, /^host:     \(no identity applies\)$/m, label);
+      assert.ok(!(result.stdout + result.stderr).includes(os.hostname()), `${label}: leaked hostname`);
+    }
+  }
+});
